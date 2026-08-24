@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BTIH Mobile App — Project Status Report</title>
+<style>
+  :root {
+    --teal: #16A7A0;
+    --teal-light: #E7F7F6;
+    --ink: #1f2430;
+    --muted: #5b6472;
+    --done: #1a9d54;
+    --done-bg: #e8f7ee;
+    --partial: #b8860b;
+    --partial-bg: #fbf3d8;
+    --incomplete: #c25e00;
+    --incomplete-bg: #fbe9d8;
+    --untouched: #7a7f88;
+    --untouched-bg: #eef0f2;
+    --risk: #c0392b;
+    --border: #dfe3e8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--ink);
+    line-height: 1.5;
+    margin: 0;
+    padding: 0 32px 64px;
+    max-width: 1000px;
+    margin: 0 auto;
+    font-size: 14px;
+  }
+  header.cover {
+    padding: 48px 0 24px;
+    border-bottom: 4px solid var(--teal);
+    margin-bottom: 24px;
+  }
+  header.cover h1 { font-size: 30px; margin: 0 0 6px; }
+  header.cover .sub { color: var(--muted); font-size: 15px; }
+  header.cover .meta { margin-top: 16px; font-size: 13px; color: var(--muted); }
+  h2 {
+    font-size: 20px;
+    margin: 34px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--teal-light);
+    color: var(--teal);
+  }
+  h3 { font-size: 16px; margin: 22px 0 6px; }
+  p { margin: 8px 0; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; font-size: 13px; }
+  th, td { border: 1px solid var(--border); padding: 7px 9px; text-align: left; vertical-align: top; }
+  th { background: var(--teal-light); font-weight: 600; }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  .badge {
+    display: inline-block; padding: 2px 9px; border-radius: 20px;
+    font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  }
+  .b-done { background: var(--done-bg); color: var(--done); }
+  .b-partial { background: var(--partial-bg); color: var(--partial); }
+  .b-incomplete { background: var(--incomplete-bg); color: var(--incomplete); }
+  .b-untouched { background: var(--untouched-bg); color: var(--untouched); }
+  .b-risk { background: #fbe4e1; color: var(--risk); }
+  .summary-grid { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+  .card {
+    flex: 1 1 150px; border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; text-align: center;
+  }
+  .card .n { font-size: 28px; font-weight: 700; }
+  .card.done .n { color: var(--done); }
+  .card.partial .n { color: var(--partial); }
+  .card.incomplete .n { color: var(--incomplete); }
+  .card.untouched .n { color: var(--untouched); }
+  .card .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .legend li { margin: 4px 0; }
+  .note {
+    background: var(--teal-light); border-left: 4px solid var(--teal);
+    padding: 10px 14px; border-radius: 6px; margin: 12px 0;
+  }
+  .risk-note {
+    background: #fbe4e1; border-left: 4px solid var(--risk);
+    padding: 10px 14px; border-radius: 6px; margin: 12px 0;
+  }
+  ul { margin: 6px 0 6px 0; padding-left: 22px; }
+  .small { font-size: 12px; color: var(--muted); }
+  @media print {
+    body { padding: 0 12px; font-size: 12px; }
+    h2 { page-break-after: avoid; }
+    table, tr, td, th { page-break-inside: avoid; }
+    header.cover { padding-top: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="cover">
+  <h1>BTIH Mobile App — Project Status Report</h1>
+  <div class="sub">Bahria Town International Hospital Karachi · Patient Mobile Application (Flutter)</div>
+  <div class="meta">
+    Repository: <code>btih_andriod_app</code> &nbsp;|&nbsp; Platform: Flutter (Dart), Android-first &nbsp;|&nbsp;
+    Backend: .NET Core Web API (Swagger) + Oracle HMIS<br/>
+    Report generated: 11 Aug 2026 &nbsp;|&nbsp; Basis: full source review of <code>lib/</code> (37 Dart files), build config, and manifest.
+  </div>
+</header>
+
+<h2>1. How to read this report</h2>
+<p>Every feature/module is classified into one of four states:</p>
+<ul class="legend">
+  <li><span class="badge b-done">COMPLETED</span> — Built and wired end-to-end (UI + service + backend call), usable.</li>
+  <li><span class="badge b-partial">PARTIAL</span> — Works but with gaps: missing sub-cases, commented-out pieces, or rough edges.</li>
+  <li><span class="badge b-incomplete">INCOMPLETE</span> — Started (some code exists) but not usable / not reachable in the app.</li>
+  <li><span class="badge b-untouched">UNTOUCHED</span> — Not started, placeholder, or an abandoned dependency with no working code.</li>
+</ul>
+<p class="small">Note: "usable" assumes the app is pointed at a running API (see the connectivity setup in <code>docs/ONBOARDING.md</code>). Backend endpoint correctness is out of scope for this client-side review.</p>
+
+<h2>2. Executive summary</h2>
+<div class="summary-grid">
+  <div class="card done"><div class="n">12</div><div class="l">Completed</div></div>
+  <div class="card partial"><div class="n">5</div><div class="l">Partial</div></div>
+  <div class="card incomplete"><div class="n">2</div><div class="l">Incomplete</div></div>
+  <div class="card untouched"><div class="n">8</div><div class="l">Untouched</div></div>
+</div>
+<p>
+  The app's <strong>core patient journey is functionally complete</strong>: launch → browse doctors →
+  book appointment → log in → view profile, appointments, discharge history, and download/share PDF
+  reports. Authentication (login, forgot-password via OTP, logout) is implemented end-to-end.
+</p>
+<p>
+  The main weaknesses are <strong>(a) security &amp; session robustness</strong> (no token/JWT auth;
+  login state is largely in-memory), <strong>(b) a few half-finished features</strong> (bill categories
+  has backend code but no screen; guest-appointment display is commented out; some report categories are
+  disabled), and <strong>(c) abandoned scaffolding</strong> (Firebase/Google-Sign-In dependencies with no
+  code, several fully-commented legacy files, and the default test still present and broken).
+</p>
+<div class="note">
+  <strong>Overall maturity:</strong> A working <em>demo/MVP-grade</em> app. It can be shown and used on a
+  LAN against the dev API. It is <em>not yet production-hardened</em> (security, session persistence,
+  error handling consistency, tests, and cleanup remain).
+</div>
+
+<h2>3. Feature status — master table</h2>
+<table>
+  <thead>
+    <tr><th style="width:22%">Feature / Module</th><th style="width:13%">Status</th><th>Notes &amp; evidence</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>App launch &amp; splash</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Animated splash (<code>splash_screen.dart</code>) → navigates to Dashboard as guest after ~3s.</td>
+    </tr>
+    <tr>
+      <td>Dashboard hub + guest gating</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Bottom nav, feature tiles, and a "Login Required" dialog that redirects guests to login (<code>dashboard_screen.dart</code>).</td>
+    </tr>
+    <tr>
+      <td>Login (phone + password)</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td><code>POST /api/Auth/login</code>; parses <code>mR_NO</code> → navigates to dashboard as logged-in. Auth class lives inside <code>login_screen.dart</code>.</td>
+    </tr>
+    <tr>
+      <td>Forgot password (OTP flow)</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Multi-step UI: verify phone → <code>send-otp</code> → <code>verify-otp</code> → <code>updatePassword</code>. All wired with resend + validation.</td>
+    </tr>
+    <tr>
+      <td>Logout</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Confirmation dialog, clears <code>SharedPreferences</code>, resets state (<code>dashboard_screen.dart</code> <code>_logout</code>).</td>
+    </tr>
+    <tr>
+      <td>Doctors list</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Paginated infinite scroll + specialization filter dropdown (<code>doctors_list_screen.dart</code> + <code>DoctorService</code> + <code>SpecializationService</code>).</td>
+    </tr>
+    <tr>
+      <td>Doctor schedule + booking</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Guest booking (saved to local SQLite + server challan) and logged-in booking (with phone verify), self/relative options (<code>doctor_schedule_screen.dart</code> + <code>BookingService</code>).</td>
+    </tr>
+    <tr>
+      <td>Appointments (current/past)</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Fetches <code>/api/Patient/appointments/{mrNo}</code>, tabs + status colors (<code>AppointmentsInfoScreen.dart</code>).</td>
+    </tr>
+    <tr>
+      <td>Patient profile</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Fetches <code>/api/Patient?MR_NO=</code>, builds profile from latest visit (<code>patient_profile_screen.dart</code>).</td>
+    </tr>
+    <tr>
+      <td>Discharge history</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Paginated via Dio (<code>discharge_history_screen.dart</code> + <code>DischargeHistoryService</code>).</td>
+    </tr>
+    <tr>
+      <td>Report history + PDF view/share</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td>Generates PDF (<code>GenerateReports</code>), views with Syncfusion viewer, downloads to file, shares via <code>share_plus</code> (<code>patient_report_history_screen.dart</code>).</td>
+    </tr>
+    <tr>
+      <td>Discharge report (PDF)</td>
+      <td><span class="badge b-done">COMPLETED</span></td>
+      <td><code>DischargeReportService</code> (Dio, PDF bytes, content-type validation).</td>
+    </tr>
+    <tr>
+      <td>Reports screen (lab/gastro/radiology/prescription)</td>
+      <td><span class="badge b-partial">PARTIAL</span></td>
+      <td>PDF generation works, but several direct per-category fetch endpoints are commented out (<code>reports_screen.dart</code> lines ~85–162). Relies on the generic generate endpoint.</td>
+    </tr>
+    <tr>
+      <td>Guest appointment display</td>
+      <td><span class="badge b-partial">PARTIAL</span></td>
+      <td>Guest bookings are <em>saved</em> to SQLite, but reading them back for display is commented out in <code>AppointmentsInfoScreen.dart</code> (~line 672). So a guest can't see their saved bookings.</td>
+    </tr>
+    <tr>
+      <td>Session persistence ("stay logged in")</td>
+      <td><span class="badge b-partial">PARTIAL</span></td>
+      <td>Inconsistent: <em>logout</em> clears <code>SharedPreferences</code>, but <em>login</em> never saves the session there — MR/name are passed via constructor and kept in memory. App restart drops you back to guest.</td>
+    </tr>
+    <tr>
+      <td>Local SQLite (guest appointments)</td>
+      <td><span class="badge b-partial">PARTIAL</span></td>
+      <td>Insert works and is used; read/display path is disabled (see above). Delete/clear helpers exist but unused.</td>
+    </tr>
+    <tr>
+      <td>Code quality / analyzer</td>
+      <td><span class="badge b-partial">PARTIAL</span></td>
+      <td>~100 analyzer issues remain (mostly <code>avoid_print</code> and <code>use_build_context_synchronously</code>). No errors — builds fine. 104 were already auto-fixed earlier.</td>
+    </tr>
+    <tr>
+      <td>Bill categories</td>
+      <td><span class="badge b-incomplete">INCOMPLETE</span></td>
+      <td><code>BillCategoryService</code> + <code>BillCategory</code> model exist and compile, but there is <strong>no screen</strong> (<code>bill_category_screen.dart</code> is missing; only commented references in <code>main.dart</code>). Not reachable in the app. Also uses a hardcoded IP.</td>
+    </tr>
+    <tr>
+      <td>Automated tests</td>
+      <td><span class="badge b-incomplete">INCOMPLETE</span></td>
+      <td>Only the default template <code>test/widget_test.dart</code> exists, and it tests a non-existent counter — it will <strong>fail</strong> if run. Effectively no test coverage.</td>
+    </tr>
+    <tr>
+      <td>Messages / chat</td>
+      <td><span class="badge b-untouched">UNTOUCHED</span></td>
+      <td>Only a "Messages feature coming soon" comment in <code>dashboard_screen.dart</code>. No implementation.</td>
+    </tr>
+    <tr>
+      <td>Firebase integration</td>
+      <td><span class="badge b-untouched">UNTOUCHED</span></td>
+      <td><code>firebase_core</code>/<code>firebase_auth</code> in <code>pubspec.yaml</code>, but no <code>Firebase.initializeApp()</code> and no usage anywhere. Dead dependency.</td>
+    </tr>
+    <tr>
+      <td>Google / social sign-in</td>
+      <td><span class="badge b-untouched">UNTOUCHED</span></td>
+      <td><code>google_sign_in</code> present; only commented stubs in <code>auth_service.dart</code>. Not implemented.</td>
+    </tr>
+    <tr>
+      <td>Token / JWT authorization</td>
+      <td><span class="badge b-untouched">UNTOUCHED</span></td>
+      <td>No auth token. After login, endpoints are called with the MR number in the URL and no <code>Authorization</code> header — a security gap (see §6).</td>
+    </tr>
+    <tr>
+      <td>Home screen</td>
+      <td><span class="badge b-untouched">UNTOUCHED</span></td>
+      <td><code>home_screen.dart</code> is a "Welcome to the Home Screen" placeholder; not used in navigation.</td>
+    </tr>
+    <tr>
+      <td>WebView report viewer</td>
+      <td><span class="badge b-untouched">UNTOUCHED</span></td>
+      <td><code>services/webview_flutter.dart</code> is entirely commented; the <code>webview_flutter</code> package isn't even in <code>pubspec.yaml</code>. Superseded by the Syncfusion PDF viewer.</td>
+    </tr>
+    <tr>
+      <td>iOS / Web / Desktop targets</td>
+      <td><span class="badge b-untouched">UNTOUCHED</span></td>
+      <td>Platform folders are auto-generated but unconfigured/untested. The app is Android-only in practice.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>4. Module-by-module detail</h2>
+
+<h3>4.1 Authentication &amp; session</h3>
+<p><strong>Completed:</strong> phone+password login, OTP-based forgot-password (verify phone → send OTP → verify → set new password), and logout with confirmation.</p>
+<p><strong>Gaps:</strong> the real auth code sits inside <code>login_screen.dart</code> rather than a dedicated service; the separate <code>auth_service.dart</code> is legacy and fully commented. Login state is not persisted (in-memory), so users are logged out on every app restart even though logout clears preferences. There is no token/JWT — subsequent API calls identify the patient by MR number in the URL.</p>
+
+<h3>4.2 Appointments</h3>
+<p><strong>Completed:</strong> browsing doctors (paginated + filter), viewing a doctor's schedule, booking for self/relative/guest, and viewing current vs past appointments. Booking for logged-in users writes to the server; guest bookings write to the server <em>and</em> local SQLite.</p>
+<p><strong>Gaps:</strong> the guest's locally-saved appointments are never displayed back (the read path in <code>AppointmentsInfoScreen</code> is commented out). Some success dialogs/snackbars are commented. A hardcoded phone-verify URL (<code>172.16.40.10:8080</code>) bypasses the central config.</p>
+
+<h3>4.3 Reports (PDF)</h3>
+<p><strong>Completed:</strong> report history list, on-device PDF generation/download, in-app viewing (Syncfusion), and sharing (<code>share_plus</code>); discharge report generation.</p>
+<p><strong>Gaps:</strong> in <code>reports_screen.dart</code>, direct per-category fetches (lab/gastro/radiology/prescription) are commented out; the screen leans on the generic generate endpoint. Some "share coming soon" remnants remain.</p>
+
+<h3>4.4 Profile &amp; discharge</h3>
+<p><strong>Completed:</strong> patient profile from latest visit; paginated discharge history; discharge report PDF. Solid loading/error states in these screens.</p>
+
+<h3>4.5 Billing</h3>
+<p><strong>Incomplete:</strong> the service and model are written (and even handle a self-signed cert), but there is no UI screen and no navigation entry, so the feature can't be used. It also points at a separate hardcoded server.</p>
+
+<h2>5. Dead / legacy files (safe to clean up)</h2>
+<table>
+  <thead><tr><th style="width:34%">File</th><th style="width:16%">Status</th><th>Recommendation</th></tr></thead>
+  <tbody>
+    <tr><td><code>lib/services/auth_service.dart</code></td><td><span class="badge b-untouched">UNTOUCHED</span></td><td>Legacy/commented. Either delete, or refactor the inline auth logic out of <code>login_screen.dart</code> into here.</td></tr>
+    <tr><td><code>lib/services/patients_service.dart</code></td><td><span class="badge b-untouched">UNTOUCHED</span></td><td>Fully commented. Delete.</td></tr>
+    <tr><td><code>lib/services/webview_flutter.dart</code></td><td><span class="badge b-untouched">UNTOUCHED</span></td><td>Fully commented; package not installed. Delete.</td></tr>
+    <tr><td><code>lib/services/url_launcher.dart</code></td><td><span class="badge b-untouched">UNTOUCHED</span></td><td>Fully commented helper. Delete (url_launcher is used inline elsewhere).</td></tr>
+    <tr><td><code>lib/models/user_model.dart</code></td><td><span class="badge b-untouched">UNTOUCHED</span></td><td><code>User</code> class defined but not used anywhere. Adopt it in the login flow, or delete.</td></tr>
+    <tr><td><code>lib/screens/home_screen.dart</code></td><td><span class="badge b-untouched">UNTOUCHED</span></td><td>Placeholder screen. Delete or repurpose.</td></tr>
+    <tr><td><code>lib/services/apointment_service.dart</code></td><td><span class="badge b-partial">PARTIAL</span></td><td>Misnamed (it's actually the <code>Appointment</code> model, not a service). Rename/move to <code>models/</code>.</td></tr>
+    <tr><td><code>test/widget_test.dart</code></td><td><span class="badge b-incomplete">INCOMPLETE</span></td><td>Default counter test — broken. Replace with real tests or remove.</td></tr>
+  </tbody>
+</table>
+
+<h2>6. Technical debt &amp; risks (prioritized)</h2>
+<div class="risk-note">
+  <strong>Security (high):</strong> No token/JWT auth; patient data is fetched using the MR number in the URL
+  with no authorization header, so any client that knows/guesses an MR number could pull records directly
+  from the API. The backend also ships plaintext DB credentials in <code>appsettings.json</code>. These
+  should be addressed before any production/public release.
+</div>
+<ul>
+  <li><span class="badge b-risk">HIGH</span> <strong>Auth tokens:</strong> introduce JWT/bearer auth end-to-end (API + app).</li>
+  <li><span class="badge b-risk">HIGH</span> <strong>Config &amp; secrets:</strong> stop committing credentials; use environment/secret storage; rotate the exposed DB password.</li>
+  <li><span class="badge b-partial">MED</span> <strong>Hardcoded IPs</strong> bypassing <code>ApiConfig.baseUrl</code> in <code>bill_category_service.dart</code> (<code>172.16.40.56</code>) and <code>doctor_schedule_screen.dart</code> (<code>172.16.40.10</code>). Unify to one config.</li>
+  <li><span class="badge b-partial">MED</span> <strong>Session persistence:</strong> save login to <code>SharedPreferences</code> and restore on splash; make logout/login symmetric.</li>
+  <li><span class="badge b-partial">MED</span> <strong>Context-after-await</strong> warnings (potential crashes) across several screens — add <code>if (!mounted) return;</code> guards.</li>
+  <li><span class="badge b-untouched">LOW</span> <strong>Cleanup:</strong> remove dead files &amp; unused dependencies (Firebase/Google if not planned); fix <code>print()</code> usage; fix naming lints.</li>
+  <li><span class="badge b-untouched">LOW</span> <strong>Tests:</strong> add at least smoke tests for services/models; fix the broken default test.</li>
+</ul>
+
+<h2>7. Recommended roadmap</h2>
+<table>
+  <thead><tr><th style="width:10%">Phase</th><th style="width:30%">Goal</th><th>Work items</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>P1 — Stabilize</strong></td>
+      <td>Make current features robust &amp; consistent</td>
+      <td>Unify all URLs to <code>ApiConfig</code>; persist session on splash; add <code>mounted</code> guards; finish guest-appointment display; re-enable/verify report categories.</td>
+    </tr>
+    <tr>
+      <td><strong>P2 — Secure</strong></td>
+      <td>Production-grade auth &amp; secrets</td>
+      <td>JWT/bearer auth (API + app); move backend secrets out of source; enforce HTTPS with a trusted cert.</td>
+    </tr>
+    <tr>
+      <td><strong>P3 — Complete</strong></td>
+      <td>Finish half-built features</td>
+      <td>Build the Bill Categories screen (or drop the code); decide on Messages/social login (implement or remove deps).</td>
+    </tr>
+    <tr>
+      <td><strong>P4 — Quality</strong></td>
+      <td>Maintainability</td>
+      <td>Remove dead files; extract auth into a service; add tests; drive analyzer issues to zero.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>8. Appendix — source inventory (<code>lib/</code>)</h2>
+<table>
+  <thead><tr><th style="width:34%">Path</th><th style="width:16%">Type</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td><code>main.dart</code></td><td>entry</td><td>App root → Splash.</td></tr>
+    <tr><td><code>utils/ip_file.dart</code></td><td>config</td><td><strong>Central API base URL</strong> (<code>ApiConfig.baseUrl</code>).</td></tr>
+    <tr><td><code>utils/database_helper.dart</code></td><td>util</td><td>SQLite (guest appointments).</td></tr>
+    <tr><td><code>utils/date_formatter.dart</code>, <code>utils/validation_mixin.dart</code></td><td>util</td><td>Date formatting; form validators.</td></tr>
+    <tr><td><code>screens/splash_screen.dart</code></td><td>screen</td><td>Launch animation → dashboard.</td></tr>
+    <tr><td><code>screens/dashboard_screen.dart</code></td><td>screen</td><td>Hub, nav, login gating, logout.</td></tr>
+    <tr><td><code>screens/login_screen.dart</code></td><td>screen</td><td>Login + OTP + password reset (contains inline auth service).</td></tr>
+    <tr><td><code>screens/doctors_list_screen.dart</code></td><td>screen</td><td>Paginated doctors + filter.</td></tr>
+    <tr><td><code>screens/doctor_schedule_screen.dart</code></td><td>screen</td><td>Schedule + booking (guest/self/relative).</td></tr>
+    <tr><td><code>screens/AppointmentsInfoScreen.dart</code></td><td>screen</td><td>Current/past appointments (misnamed file).</td></tr>
+    <tr><td><code>screens/patient_profile_screen.dart</code></td><td>screen</td><td>Patient profile.</td></tr>
+    <tr><td><code>screens/discharge_history_screen.dart</code></td><td>screen</td><td>Discharge list.</td></tr>
+    <tr><td><code>screens/reports_screen.dart</code></td><td>screen</td><td>Report categories + PDF generate.</td></tr>
+    <tr><td><code>screens/patient_report_history_screen.dart</code></td><td>screen</td><td>Report history + view/share PDF.</td></tr>
+    <tr><td><code>screens/home_screen.dart</code></td><td>screen</td><td>Unused placeholder.</td></tr>
+    <tr><td><code>services/doctors_service.dart</code></td><td>service</td><td>Doctors + schedule.</td></tr>
+    <tr><td><code>services/specialization_service.dart</code></td><td>service</td><td>Specializations (used by filter).</td></tr>
+    <tr><td><code>services/booking_service.dart</code></td><td>service</td><td>Insert appointment (challan).</td></tr>
+    <tr><td><code>services/discharge_history_service.dart</code></td><td>service</td><td>Discharge history (Dio).</td></tr>
+    <tr><td><code>services/discharge_report_service.dart</code></td><td>service</td><td>Discharge report PDF (Dio).</td></tr>
+    <tr><td><code>services/patient_report_service.dart</code></td><td>service</td><td>Report history.</td></tr>
+    <tr><td><code>services/bill_category_service.dart</code></td><td>service</td><td>Bill data (no UI; hardcoded IP).</td></tr>
+    <tr><td><code>services/auth_service.dart</code>, <code>patients_service.dart</code>, <code>webview_flutter.dart</code>, <code>url_launcher.dart</code></td><td>service</td><td>Legacy/commented — unused.</td></tr>
+    <tr><td><code>models/*.dart</code></td><td>models</td><td>patient, doctors, doctor_schedule, discharge_history, patient_report, specialization, bill_category, local_appointment, user (unused), appointment (in apointment_service.dart).</td></tr>
+  </tbody>
+</table>
+
+<p class="small" style="margin-top:28px; border-top:1px solid var(--border); padding-top:10px;">
+  Generated from a manual code review. Counts in the executive summary group related items (e.g. "Local
+  SQLite" and "Guest appointment display" both reflect the same partial area). For live status, run
+  <code>flutter analyze</code> and search the codebase for <code>// TODO</code>, commented
+  <code>Navigator</code> blocks, and "coming soon" markers.
+</p>
+
+</body>
+</html>

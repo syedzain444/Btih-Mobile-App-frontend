@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Patient Login &amp; Sign Up — Simple Guide</title>
+<style>
+  :root {
+    --primary: #A62639;
+    --deep: #7D1D2B;
+    --light: #FBEEEF;
+    --soft: #F6DEE1;
+    --ink: #2C2224;
+    --muted: #8C7678;
+    --border: #F0DCDE;
+    --code-bg: #2C2224;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--ink);
+    line-height: 1.55;
+    margin: 0 auto;
+    padding: 0 32px 64px;
+    max-width: 960px;
+    font-size: 14px;
+    background: #FFF8F8;
+  }
+  header.cover {
+    padding: 48px 0 24px;
+    border-bottom: 4px solid var(--deep);
+    margin-bottom: 28px;
+  }
+  header.cover h1 {
+    font-size: 28px;
+    margin: 0 0 8px;
+    color: var(--deep);
+  }
+  header.cover .sub {
+    color: var(--muted);
+    font-size: 15px;
+  }
+  nav.toc {
+    background: var(--light);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 24px 0 32px;
+  }
+  nav.toc h2 {
+    margin: 0 0 10px;
+    font-size: 15px;
+    color: var(--deep);
+    border: none;
+    padding: 0;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+  }
+  nav.toc li { margin: 4px 0; }
+  nav.toc a {
+    color: var(--primary);
+    text-decoration: none;
+  }
+  nav.toc a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 20px;
+    margin: 36px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--soft);
+    color: var(--deep);
+  }
+  h3 {
+    font-size: 16px;
+    margin: 22px 0 8px;
+    color: var(--primary);
+  }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 12px; padding-left: 22px; }
+  li { margin: 4px 0; }
+  code {
+    background: #fff;
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    color: var(--deep);
+  }
+  pre {
+    background: var(--code-bg);
+    color: #f5f0f1;
+    padding: 14px 16px;
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.45;
+    margin: 12px 0 16px;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 18px;
+    font-size: 13px;
+    background: #fff;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--soft);
+    font-weight: 600;
+    color: var(--deep);
+  }
+  tbody tr:nth-child(even) { background: #FFFAFA; }
+  .note {
+    background: var(--light);
+    border-left: 4px solid var(--primary);
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  .flow {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 12px 0 16px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink);
+    white-space: pre-wrap;
+  }
+  .badge-yes {
+    display: inline-block;
+    background: #E8F5E9;
+    color: #2E7D32;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+  .badge-no {
+    display: inline-block;
+    background: #FFF3E0;
+    color: #E65100;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+  .steps {
+    counter-reset: step;
+    list-style: none;
+    padding-left: 0;
+  }
+  .steps li {
+    counter-increment: step;
+    margin: 10px 0;
+    padding-left: 36px;
+    position: relative;
+  }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    width: 24px;
+    height: 24px;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 24px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .related {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .related a {
+    display: inline-block;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: var(--primary);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .related a:hover {
+    background: var(--light);
+    border-color: var(--primary);
+  }
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header class="cover">
+  <h1>Patient Login &amp; Sign Up — Simple Guide</h1>
+  <p class="sub">What happens on the Welcome screen and where patient credentials live in the database.</p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#welcome">Welcome screen — four paths</a></li>
+    <li><a href="#storage">Where credentials are stored</a></li>
+    <li><a href="#flow-login">Flow 1 — Patient Login</a></li>
+    <li><a href="#flow-signup">Flow 2 — Patient Sign Up</a></li>
+    <li><a href="#flow-staff">Flow 3 — Hospital Staff Login</a></li>
+    <li><a href="#flow-guest">Flow 4 — Guest</a></li>
+    <li><a href="#forgot">Forgot password</a></li>
+    <li><a href="#checklist">Quick test checklist</a></li>
+    <li><a href="#faq">Common confusion</a></li>
+  </ol>
+</nav>
+
+<section id="welcome">
+  <h2>Welcome screen — four paths</h2>
+  <table>
+    <thead>
+      <tr><th>Button</th><th>What it does</th><th>Uses database?</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Login</strong></td>
+        <td>Patient login (phone + password)</td>
+        <td><span class="badge-yes">Yes — reads HMIS</span></td>
+      </tr>
+      <tr>
+        <td><strong>Sign Up</strong></td>
+        <td>Create or activate mobile login</td>
+        <td><span class="badge-yes">Yes — writes HMIS</span></td>
+      </tr>
+      <tr>
+        <td><strong>Hospital Staff Login</strong></td>
+        <td>Same login UI, different label</td>
+        <td>Same patient API today <em>(staff accounts not built yet)</em></td>
+      </tr>
+      <tr>
+        <td><strong>Login as a Guest</strong></td>
+        <td>Opens dashboard without MR number</td>
+        <td><span class="badge-no">No — limited features</span></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="storage">
+  <h2>Where patient credentials are stored</h2>
+  <div class="note">
+    <strong>No separate “mobile login” table is required.</strong> The hospital HMIS already has everything you need.
+  </div>
+  <table>
+    <thead>
+      <tr><th>Table</th><th>Column</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>PATIENT_INFORMATION</strong></td><td><code>CONTACT_NO</code></td><td>Phone number used as login username</td></tr>
+      <tr><td><strong>PATIENT_MST</strong></td><td><code>PATIENT_PASSWORD</code></td><td>Password</td></tr>
+      <tr><td><strong>PATIENT_MST</strong></td><td><code>MR_NO</code></td><td>Patient ID (returned after login)</td></tr>
+      <tr><td><strong>PATIENT_MST</strong></td><td><code>FIRST_NAME</code>, <code>LAST_NAME</code></td><td>Name (Sign Up splits full name)</td></tr>
+    </tbody>
+  </table>
+  <p>Both tables are linked by <strong><code>MR_NO</code></strong>.</p>
+
+  <h3>SQL — see who can log in</h3>
+  <pre><code>SELECT pi.MR_NO,
+       pi.CONTACT_NO,
+       pm.FIRST_NAME,
+       pm.LAST_NAME,
+       pm.PATIENT_PASSWORD
+FROM PATIENT_MST pm
+JOIN PATIENT_INFORMATION pi ON pi.MR_NO = pm.MR_NO
+WHERE pi.CONTACT_NO IS NOT NULL
+  AND pm.PATIENT_PASSWORD IS NOT NULL;</code></pre>
+  <p>That is the same data the app uses when you log in with test credentials from SQL Developer.</p>
+</section>
+
+<section id="flow-login">
+  <h2>Flow 1 — Patient Login</h2>
+  <div class="flow">Welcome → Login → enter phone + password
+    → Flutter calls POST /api/Auth/login
+    → API checks PATIENT_INFORMATION + PATIENT_MST
+    → Returns MR_NO + firstName
+    → App opens Dashboard (isLoggedIn: true)</div>
+  <p><strong>Code:</strong></p>
+  <ul>
+    <li>Flutter: <code>lib/screens/login_screen.dart</code>, <code>lib/services/auth_service.dart</code></li>
+    <li>API: <code>AuthController.cs</code> → <code>AuthRepository.LoginAsync</code></li>
+  </ul>
+</section>
+
+<section id="flow-signup">
+  <h2>Flow 2 — Patient Sign Up</h2>
+  <div class="flow">Welcome → Sign Up → name, phone, password
+    → Flutter calls POST /api/Auth/signup
+    → API:
+         If phone already in PATIENT_INFORMATION
+            → UPDATE PATIENT_MST.PATIENT_PASSWORD
+         Else
+            → INSERT new row in PATIENT_MST + PATIENT_INFORMATION
+               (MR number like MOB-250824-1234)
+    → User can log in with same phone + password</div>
+  <p><strong>Code:</strong></p>
+  <ul>
+    <li>Flutter: <code>lib/screens/signup_screen.dart</code></li>
+    <li>API: <code>AuthRepository.RegisterAsync</code></li>
+  </ul>
+
+  <h3>Verify sign-up in SQL Developer</h3>
+  <pre><code>SELECT pi.MR_NO, pi.CONTACT_NO, pm.FIRST_NAME, pm.PATIENT_PASSWORD
+FROM PATIENT_MST pm
+JOIN PATIENT_INFORMATION pi ON pi.MR_NO = pm.MR_NO
+WHERE pi.CONTACT_NO = '03001234567';   -- your test phone</code></pre>
+</section>
+
+<section id="flow-staff">
+  <h2>Flow 3 — Hospital Staff Login</h2>
+  <p>The welcome screen opens the <strong>same</strong> login screen with <code>isStaffLogin: true</code> (different title and “Contact Administrator” instead of Sign Up).</p>
+  <div class="note">
+    There is <strong>no separate doctor/admin API yet</strong>. Staff would need their own tables and endpoints in a future task.
+  </div>
+</section>
+
+<section id="flow-guest">
+  <h2>Flow 4 — Guest</h2>
+  <p><strong>Login as a Guest</strong> skips the API and opens the dashboard with:</p>
+  <ul>
+    <li><code>patientMrNo: ''</code></li>
+    <li><code>isLoggedIn: false</code></li>
+  </ul>
+  <p>Guest can browse some screens (e.g. book appointment locally) but cannot see personal records, billing tied to MR number, etc.</p>
+</section>
+
+<section id="forgot">
+  <h2>Forgot password</h2>
+  <p>Uses existing HMIS data: verify phone → OTP → <code>updatePassword</code> updates <code>PATIENT_MST.PATIENT_PASSWORD</code>.</p>
+</section>
+
+<section id="checklist">
+  <h2>Quick test checklist</h2>
+  <ol class="steps">
+    <li>Start API: <code>start-mobile-dev.bat</code></li>
+    <li>In SQL Developer, note an existing <code>CONTACT_NO</code> + <code>PATIENT_PASSWORD</code>, or sign up a new phone</li>
+    <li><strong>Login</strong> with that phone + password → should reach dashboard</li>
+    <li><strong>Sign Up</strong> with a new phone → run SQL above → <strong>Login</strong> again</li>
+  </ol>
+</section>
+
+<section id="faq">
+  <h2>Common confusion</h2>
+  <table>
+    <thead>
+      <tr><th>Question</th><th>Answer</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>“Are credentials only in the app?”</td>
+        <td>No. They must be in Oracle (<code>PATIENT_MST</code> + <code>PATIENT_INFORMATION</code>).</td>
+      </tr>
+      <tr>
+        <td>“Do I need a new table for Sign Up?”</td>
+        <td>No. Sign Up writes to the same HMIS tables.</td>
+      </tr>
+      <tr>
+        <td>“Why could Sign Up fail?”</td>
+        <td>HMIS may require extra columns (NOT NULL, triggers). Fix with IT or register at reception first.</td>
+      </tr>
+      <tr>
+        <td>“Is Staff login different?”</td>
+        <td>UI only for now — still uses patient login API.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Related guides</h2>
+  <div class="related">
+    <a href="DATABASE_GUIDE.html">Database Guide (HTML)</a>
+    <a href="DATABASE_GUIDE.md">Database Guide (Markdown)</a>
+    <a href="AUTH_IMPLEMENTATION.md">Auth Implementation</a>
+  </div>
+</section>
+
+<footer>
+  HMIS Mobile App — Patient Auth Guide · Open this file in any web browser
+</footer>
+
+</body>
+</html>

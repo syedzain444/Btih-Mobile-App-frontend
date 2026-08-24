@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HMIS Oracle Database Guide</title>
+<style>
+  :root {
+    --primary: #A62639;
+    --deep: #7D1D2B;
+    --light: #FBEEEF;
+    --soft: #F6DEE1;
+    --ink: #2C2224;
+    --muted: #8C7678;
+    --border: #F0DCDE;
+    --code-bg: #2C2224;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--ink);
+    line-height: 1.55;
+    margin: 0 auto;
+    padding: 0 32px 64px;
+    max-width: 960px;
+    font-size: 14px;
+    background: #FFF8F8;
+  }
+  header.cover {
+    padding: 48px 0 24px;
+    border-bottom: 4px solid var(--deep);
+    margin-bottom: 28px;
+  }
+  header.cover h1 {
+    font-size: 28px;
+    margin: 0 0 8px;
+    color: var(--deep);
+  }
+  header.cover .sub {
+    color: var(--muted);
+    font-size: 15px;
+  }
+  nav.toc {
+    background: var(--light);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 24px 0 32px;
+  }
+  nav.toc h2 {
+    margin: 0 0 10px;
+    font-size: 15px;
+    color: var(--deep);
+    border: none;
+    padding: 0;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 20px;
+  }
+  nav.toc li { margin: 4px 0; }
+  nav.toc a {
+    color: var(--primary);
+    text-decoration: none;
+  }
+  nav.toc a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 20px;
+    margin: 36px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--soft);
+    color: var(--deep);
+  }
+  h3 {
+    font-size: 16px;
+    margin: 22px 0 8px;
+    color: var(--primary);
+  }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 12px; padding-left: 22px; }
+  li { margin: 4px 0; }
+  code {
+    background: #fff;
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    color: var(--deep);
+  }
+  pre {
+    background: var(--code-bg);
+    color: #f5f0f1;
+    padding: 14px 16px;
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.45;
+    margin: 12px 0 16px;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 18px;
+    font-size: 13px;
+    background: #fff;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--soft);
+    font-weight: 600;
+    color: var(--deep);
+  }
+  tbody tr:nth-child(even) { background: #FFFAFA; }
+  .note {
+    background: var(--light);
+    border-left: 4px solid var(--primary);
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  .warn {
+    background: #FFF3E0;
+    border-left: 4px solid #E65100;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  .steps {
+    counter-reset: step;
+    list-style: none;
+    padding-left: 0;
+  }
+  .steps li {
+    counter-increment: step;
+    margin: 10px 0;
+    padding-left: 36px;
+    position: relative;
+  }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    width: 24px;
+    height: 24px;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 24px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header class="cover">
+  <h1>HMIS Oracle Database Guide</h1>
+  <p class="sub">Simple guide for exploring the hospital database used by the mobile app.</p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#connect">Connect in SQL Developer</a></li>
+    <li><a href="#all-tables">See all tables</a></li>
+    <li><a href="#columns">See columns of any table</a></li>
+    <li><a href="#main-tables">Main tables for the mobile app</a></li>
+    <li><a href="#signup-records">View mobile Sign Up records</a></li>
+    <li><a href="#find-tables">Find tables by keyword</a></li>
+    <li><a href="#row-counts">Count rows in important tables</a></li>
+    <li><a href="#tips">SQL Developer tips</a></li>
+    <li><a href="#two-dbs">Two databases in appsettings.json</a></li>
+    <li><a href="#after-signup">After implementing Sign Up</a></li>
+    <li><a href="#safety">Safety</a></li>
+  </ol>
+</nav>
+
+<section id="connect">
+  <h2>1. Connect in SQL Developer</h2>
+  <p>Use your <strong>HMISConnection</strong> settings:</p>
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Username</td><td><code>HMIS</code></td></tr>
+      <tr><td>Password</td><td><code>hmis</code></td></tr>
+      <tr><td>Hostname</td><td><code>172.20.10.52</code></td></tr>
+      <tr><td>Port</td><td><code>8076</code></td></tr>
+      <tr><td>Service name</td><td><code>SIDHOSER</code></td></tr>
+    </tbody>
+  </table>
+  <p>Click <strong>Test</strong> → <strong>Connect</strong>.</p>
+</section>
+
+<section id="all-tables">
+  <h2>2. See ALL tables you can access</h2>
+  <p>All tables owned by the HMIS user:</p>
+  <pre><code>SELECT table_name
+FROM user_tables
+ORDER BY table_name;</code></pre>
+  <p>All tables HMIS can see (other schemas too):</p>
+  <pre><code>SELECT owner, table_name
+FROM all_tables
+WHERE owner IN ('HMIS', 'HOSWEB_MVC_LOCAL', 'HOSWEB_MVC_LIVE')
+ORDER BY owner, table_name;</code></pre>
+  <p><strong>In SQL Developer UI (no SQL):</strong></p>
+  <ol>
+    <li>Left panel → <strong>Connections</strong></li>
+    <li>Expand <strong>HMISConnection</strong></li>
+    <li>Expand <strong>Tables</strong> → full list with row counts</li>
+  </ol>
+</section>
+
+<section id="columns">
+  <h2>3. See columns of any table</h2>
+  <p>Replace <code>PATIENT_MST</code> with any table name:</p>
+  <pre><code>SELECT column_name, data_type, data_length, nullable
+FROM all_tab_columns
+WHERE table_name = 'PATIENT_MST'
+  AND owner = 'HMIS'
+ORDER BY column_id;</code></pre>
+  <p>Quick peek at data:</p>
+  <pre><code>SELECT * FROM PATIENT_MST WHERE ROWNUM &lt;= 10;</code></pre>
+</section>
+
+<section id="main-tables">
+  <h2>4. Main tables for the mobile app</h2>
+  <table>
+    <thead>
+      <tr><th>Table</th><th>What it stores</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>PATIENT_MST</strong></td><td>Patient master: name, gender, <strong>PATIENT_PASSWORD</strong> (login password)</td></tr>
+      <tr><td><strong>PATIENT_INFORMATION</strong></td><td>Contact, CNIC, email, blood group, DOB</td></tr>
+      <tr><td><strong>PATIENT_VISIT</strong></td><td>Hospital visits (needed for full profile/history)</td></tr>
+      <tr><td><strong>MOBILE_SIGNUP_REQUEST</strong></td><td>Mobile app sign-up log <em>(run setup script first)</em></td></tr>
+      <tr><td><strong>PRESCRIPTIONS</strong></td><td>Prescription records</td></tr>
+      <tr><td><strong>V_LABORATORY_GEN</strong></td><td>Lab / gastro / radiology reports (view)</td></tr>
+    </tbody>
+  </table>
+  <h3>Login uses these two</h3>
+  <pre><code>SELECT pi.MR_NO, pi.CONTACT_NO, pm.FIRST_NAME, pm.PATIENT_PASSWORD
+FROM PATIENT_MST pm
+JOIN PATIENT_INFORMATION pi ON pi.MR_NO = pm.MR_NO
+WHERE pi.CONTACT_NO = '03032431177';</code></pre>
+</section>
+
+<section id="signup-records">
+  <h2>5. View mobile Sign Up records</h2>
+  <div class="note">
+    <strong>First time only</strong> — run the setup script in SQL Developer:<br>
+    Open file: <code>HospitalMobileAPPApi/Scripts/create_mobile_signup.sql</code><br>
+    Select all → <strong>Run Script</strong> (F5).
+  </div>
+  <p>Then query sign-ups:</p>
+  <pre><code>SELECT id, full_name, contact_no, mr_no, status, created_at
+FROM MOBILE_SIGNUP_REQUEST
+ORDER BY created_at DESC;</code></pre>
+  <h3>Status meanings</h3>
+  <table>
+    <thead>
+      <tr><th>Status</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>REGISTERED_NEW</code></td><td>New patient created in HMIS — can log in</td></tr>
+      <tr><td><code>ACTIVATED_EXISTING</code></td><td>Phone already in HMIS — password set — can log in</td></tr>
+      <tr><td><code>PENDING</code></td><td>Saved for reception — insert into HMIS failed — cannot log in yet</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="find-tables">
+  <h2>6. Find tables by keyword</h2>
+  <pre><code>SELECT owner, table_name
+FROM all_tables
+WHERE UPPER(table_name) LIKE '%PATIENT%'
+ORDER BY owner, table_name;</code></pre>
+  <pre><code>SELECT owner, table_name
+FROM all_tables
+WHERE UPPER(table_name) LIKE '%BILL%'
+   OR UPPER(table_name) LIKE '%APPOINT%'
+ORDER BY owner, table_name;</code></pre>
+</section>
+
+<section id="row-counts">
+  <h2>7. Count rows in important tables</h2>
+  <pre><code>SELECT 'PATIENT_MST' AS tbl, COUNT(*) AS cnt FROM PATIENT_MST
+UNION ALL
+SELECT 'PATIENT_INFORMATION', COUNT(*) FROM PATIENT_INFORMATION
+UNION ALL
+SELECT 'PATIENT_VISIT', COUNT(*) FROM PATIENT_VISIT
+UNION ALL
+SELECT 'MOBILE_SIGNUP_REQUEST', COUNT(*) FROM MOBILE_SIGNUP_REQUEST;</code></pre>
+  <p><em>If MOBILE_SIGNUP_REQUEST errors, run the setup script first.</em></p>
+</section>
+
+<section id="tips">
+  <h2>8. SQL Developer tips</h2>
+  <table>
+    <thead>
+      <tr><th>Task</th><th>How</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Browse tables</td><td>Connections → Tables → double-click table → <strong>Data</strong> tab</td></tr>
+      <tr><td>Run one statement</td><td>Select SQL → <strong>Ctrl+Enter</strong></td></tr>
+      <tr><td>Run script (CREATE TABLE)</td><td><strong>F5</strong> (Run Script)</td></tr>
+      <tr><td>Export results</td><td>Right-click result grid → Export</td></tr>
+      <tr><td>Table relationships</td><td>Right-click table → <strong>Data Modeler</strong> (if licensed)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="two-dbs">
+  <h2>9. Two databases in appsettings.json</h2>
+  <table>
+    <thead>
+      <tr><th>Connection name</th><th>Host</th><th>Used for</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>HMISConnection</strong></td><td>172.20.10.52:8076</td><td>Login, patients, reports, signup</td></tr>
+      <tr><td><strong>HOS_WEB_MVC_LIVE</strong></td><td>172.16.10.73:1522</td><td>Appointments (separate DB)</td></tr>
+    </tbody>
+  </table>
+  <p>Connect to each separately in SQL Developer if you need appointment tables.</p>
+</section>
+
+<section id="after-signup">
+  <h2>10. After implementing Sign Up</h2>
+  <ol class="steps">
+    <li>Run <code>create_mobile_signup.sql</code> once in SQL Developer</li>
+    <li>Restart API (<code>start-mobile-dev.bat</code>)</li>
+    <li>Sign up in the app</li>
+    <li>Check with the queries below</li>
+    <li>If <code>canLogin</code> was true in the app, use <strong>Login</strong> with the same phone + password</li>
+  </ol>
+  <pre><code>SELECT * FROM MOBILE_SIGNUP_REQUEST ORDER BY created_at DESC;
+
+SELECT pi.MR_NO, pi.CONTACT_NO, pm.FIRST_NAME, pm.PATIENT_PASSWORD
+FROM PATIENT_MST pm
+JOIN PATIENT_INFORMATION pi ON pi.MR_NO = pm.MR_NO
+WHERE pi.CONTACT_NO = 'YOUR_PHONE';</code></pre>
+</section>
+
+<section id="safety">
+  <h2>11. Safety</h2>
+  <div class="warn">
+    <ul style="margin:0;padding-left:18px;">
+      <li><strong>Live DB</strong> — avoid <code>DELETE</code> / <code>UPDATE</code> without IT approval</li>
+      <li>Always use <code>SELECT</code> first</li>
+      <li>Use <code>COMMIT</code> only when you intend to save changes</li>
+      <li>Test patients use MR numbers starting with <code>MOB-</code> from mobile registration</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  HMIS Mobile App — Database Guide · Open this file in any web browser
+</footer>
+
+</body>
+</html>
