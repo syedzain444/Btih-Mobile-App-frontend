@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "380462808341",
+    "project_id": "btih-mobile-app",
+    "storage_bucket": "btih-mobile-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:380462808341:android:b212476da3ad2cb2fefd1c",
+        "android_client_info": {
+          "package_name": "com.example.btih_andriod_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvFg_3h8NQsmTzQvmKi-KE-44htVsMOXA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
