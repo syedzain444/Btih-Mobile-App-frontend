@@ -133,7 +133,7 @@ class AuthService {
               result.addAll(dataMap);
             }
 
-            if (path == '/api/Auth/login') {
+            if (path == '/api/Auth/login' || path == '/api/Auth/register') {
               await AuthSession.saveFromLoginResponse(result);
             }
 
@@ -183,9 +183,10 @@ class AuthService {
     return null;
   }
 
-  static String? extractResetToken(Map<String, dynamic> response) {
-    for (final key in ['resetToken', 'ResetToken', 'reset_token']) {
-      final value = response[key]?.toString();
+  /// OTP returned by the API when SMS delivery fails but OTP was cached server-side.
+  static String? extractDebugOtp(Map<String, dynamic> response) {
+    for (final key in ['debugOtp', 'DebugOtp', 'debug_otp']) {
+      final value = response[key]?.toString().trim();
       if (value != null && value.isNotEmpty) {
         return value;
       }
@@ -193,8 +194,8 @@ class AuthService {
 
     final data = response['data'];
     if (data is Map) {
-      for (final key in ['resetToken', 'ResetToken', 'reset_token']) {
-        final value = data[key]?.toString();
+      for (final key in ['debugOtp', 'DebugOtp', 'debug_otp']) {
+        final value = data[key]?.toString().trim();
         if (value != null && value.isNotEmpty) {
           return value;
         }
@@ -260,15 +261,46 @@ class AuthService {
   Future<Map<String, dynamic>> updatePassword({
     required String mrno,
     required String patientPassword,
-    required String resetToken,
   }) {
     return _request(
       method: 'POST',
       path: '/api/Auth/updatePassword',
       body: {
         'mrNo': mrno.trim(),
-        'newPassword': patientPassword,
-        'resetToken': resetToken.trim(),
+        'patientPassword': patientPassword,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> sendRegistrationOtp(String phoneNumber) {
+    return _request(
+      method: 'POST',
+      path: '/api/Auth/send-registration-otp',
+      query: {'phoneNumber': phoneNumber.trim()},
+    );
+  }
+
+  Future<Map<String, dynamic>> register({
+    required String phoneNumber,
+    required String firstName,
+    String? lastName,
+    required String password,
+    required String confirmPassword,
+    required String otp,
+    required bool acceptTerms,
+  }) {
+    return _request(
+      method: 'POST',
+      path: '/api/Auth/register',
+      body: {
+        'phoneNumber': phoneNumber.trim(),
+        'firstName': firstName.trim(),
+        if (lastName != null && lastName.trim().isNotEmpty)
+          'lastName': lastName.trim(),
+        'password': password,
+        'confirmPassword': confirmPassword,
+        'otp': otp.trim(),
+        'acceptTerms': acceptTerms,
       },
     );
   }

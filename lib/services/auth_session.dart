@@ -1,10 +1,11 @@
 import 'dart:async';
 
-import 'package:btih_andriod_app/screens/dashboard_screen.dart';
+import 'package:btih_andriod_app/screens/patient_main_shell.dart';
 import 'package:btih_andriod_app/screens/welcome_screen.dart';
 import 'package:btih_andriod_app/services/guest_session.dart';
 import 'package:btih_andriod_app/services/notification_service.dart';
 import 'package:btih_andriod_app/services/push_notification_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,6 +20,7 @@ class AuthSession {
   static const _tokenTypeKey = 'auth_token_type';
   static const _mrNoKey = 'auth_mr_no';
   static const _firstNameKey = 'auth_first_name';
+  static const _lastNameKey = 'auth_last_name';
   static const _loggedInKey = 'auth_is_logged_in';
   static const _expiresAtKey = 'auth_expires_at';
 
@@ -28,6 +30,7 @@ class AuthSession {
   static String _tokenType = 'Bearer';
   static String? _mrNo;
   static String? _firstName;
+  static String? _lastName;
   static bool _isLoggedIn = false;
   static DateTime? _expiresAt;
   static Timer? _expiryTimer;
@@ -35,8 +38,14 @@ class AuthSession {
   static String? get token => _token;
   static String? get mrNo => _mrNo;
   static DateTime? get expiresAt => _expiresAt;
-  static String get displayName =>
-      (_firstName?.trim().isNotEmpty == true) ? _firstName!.trim() : 'Patient';
+  static String get displayName {
+    final first = _firstName?.trim() ?? '';
+    final last = _lastName?.trim() ?? '';
+    final full = '$first $last'.trim();
+    if (full.isNotEmpty) return full;
+    if (first.isNotEmpty) return first;
+    return 'Patient';
+  }
 
   static Duration? get timeRemaining {
     if (_expiresAt == null) return null;
@@ -67,6 +76,7 @@ class AuthSession {
     _tokenType = prefs.getString(_tokenTypeKey) ?? 'Bearer';
     _mrNo = prefs.getString(_mrNoKey);
     _firstName = prefs.getString(_firstNameKey);
+    _lastName = prefs.getString(_lastNameKey);
     _isLoggedIn = prefs.getBool(_loggedInKey) ?? false;
 
     final expiresRaw = prefs.getString(_expiresAtKey);
@@ -96,6 +106,7 @@ class AuthSession {
 
     var mrNo = '';
     var firstName = response['firstName']?.toString() ?? '';
+    var lastName = response['lastName']?.toString() ?? '';
 
     if (mrData is Map) {
       mrNo = (mrData['mrNo'] ?? mrData['MrNo'] ?? mrData['MR_NO'])
@@ -103,6 +114,8 @@ class AuthSession {
           '';
       firstName = (mrData['firstName'] ?? mrData['FirstName'])?.toString() ??
           firstName;
+      lastName =
+          (mrData['lastName'] ?? mrData['LastName'])?.toString() ?? lastName;
     } else if (mrData != null) {
       mrNo = mrData.toString();
     }
@@ -110,8 +123,23 @@ class AuthSession {
     if (firstName.isEmpty) {
       firstName = response['firstName']?.toString() ?? 'Patient';
     }
+    if (lastName.isEmpty) {
+      lastName = response['lastName']?.toString() ?? '';
+    }
 
-    return {'mrNo': mrNo, 'firstName': firstName};
+    return {'mrNo': mrNo, 'firstName': firstName, 'lastName': lastName};
+  }
+
+  /// Keeps dashboard greeting in sync after profile edits.
+  static Future<void> updateProfileName({
+    required String firstName,
+    String lastName = '',
+  }) async {
+    _firstName = firstName.trim();
+    _lastName = lastName.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_firstNameKey, _firstName!);
+    await prefs.setString(_lastNameKey, _lastName ?? '');
   }
 
   static DateTime resolveExpiresAt(Map<String, dynamic> response) {
@@ -133,6 +161,10 @@ class AuthSession {
     return DateTime.now().add(sessionDuration);
   }
 
+  /// True when a JWT was saved and the session has not expired.
+  static bool get hasValidToken =>
+      _token != null && _token!.isNotEmpty && !isExpired;
+
   static Future<void> saveFromLoginResponse(
     Map<String, dynamic> response,
   ) async {
@@ -151,6 +183,7 @@ class AuthSession {
     _tokenType = response['tokenType']?.toString() ?? 'Bearer';
     _mrNo = mrNo;
     _firstName = identity['firstName'] ?? 'Patient';
+    _lastName = identity['lastName'] ?? '';
     _expiresAt = resolveExpiresAt(response);
     _isLoggedIn = true;
 
@@ -159,10 +192,13 @@ class AuthSession {
     await prefs.setString(_tokenTypeKey, _tokenType);
     await prefs.setString(_mrNoKey, _mrNo!);
     await prefs.setString(_firstNameKey, _firstName!);
+    await prefs.setString(_lastNameKey, _lastName ?? '');
     await prefs.setBool(_loggedInKey, true);
     await prefs.setString(_expiresAtKey, _expiresAt!.toIso8601String());
     await NotificationService.instance.reloadForCurrentUser();
-    await PushNotificationService.instance.registerForCurrentUser();
+    if (!kIsWeb) {
+      await PushNotificationService.instance.registerForCurrentUser();
+    }
     await GuestSession.clear();
     _scheduleExpiryTimer();
   }
@@ -174,9 +210,12 @@ class AuthSession {
     _tokenType = 'Bearer';
     _mrNo = null;
     _firstName = null;
+    _lastName = null;
     _expiresAt = null;
     _isLoggedIn = false;
-    await PushNotificationService.instance.clearOnLogout();
+    if (!kIsWeb) {
+      await PushNotificationService.instance.clearOnLogout();
+    }
     await NotificationService.instance.clearForLogout();
 
     final prefs = await SharedPreferences.getInstance();
@@ -184,6 +223,7 @@ class AuthSession {
     await prefs.remove(_tokenTypeKey);
     await prefs.remove(_mrNoKey);
     await prefs.remove(_firstNameKey);
+    await prefs.remove(_lastNameKey);
     await prefs.remove(_loggedInKey);
     await prefs.remove(_expiresAtKey);
   }
@@ -259,7 +299,7 @@ class AuthSession {
   static Route<dynamic>? restoredDashboardRoute() {
     if (!isLoggedIn || _mrNo == null) return null;
     return MaterialPageRoute(
-      builder: (_) => DashboardScreen(
+      builder: (_) => PatientMainShell(
         patientMrNo: _mrNo!,
         patientName: displayName,
         isLoggedIn: true,

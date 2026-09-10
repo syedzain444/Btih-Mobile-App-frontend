@@ -6,11 +6,12 @@ import 'package:btih_andriod_app/services/auth_exceptions.dart';
 import 'package:btih_andriod_app/services/auth_service.dart';
 import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
-import 'package:btih_andriod_app/screens/dashboard_screen.dart';
+import 'package:btih_andriod_app/screens/patient_main_shell.dart';
 import '../theme/app_typography.dart';
 import '../utils/auth_validation.dart';
 import '../utils/ip_file.dart';
 import 'package:btih_andriod_app/screens/forgot_password_screen.dart';
+import 'package:btih_andriod_app/screens/sign_up_screen.dart';
 import '../theme/app_colors.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/login_outlined_button.dart';
@@ -121,7 +122,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
         onSuccess: () {
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(
-                builder: (_) => DashboardScreen(
+                builder: (_) => PatientMainShell(
                   patientMrNo: mrNo,
                   patientName: patientName,
                   isLoggedIn: true,
@@ -163,7 +164,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
-        builder: (_) => const DashboardScreen(
+        builder: (_) => const PatientMainShell(
           patientMrNo: '',
           patientName: 'Guest',
           isLoggedIn: false,
@@ -265,7 +266,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
           ),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(28, 38, 28, 28),
+              padding: const EdgeInsets.fromLTRB(28, 25, 28, 28),
               child: Form(
                 key: _formKey,
                 child: Column(
@@ -350,7 +351,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                               onTap: () {
                                 Navigator.of(context).pushAndRemoveUntil(
                                   MaterialPageRoute(
-                                    builder: (_) => DashboardScreen(
+                                    builder: (_) => PatientMainShell(
                                       patientMrNo: '',
                                       patientName:
                                           widget.patientName ?? 'Patient',
@@ -407,13 +408,21 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                       color: AppColors.greyText,
                                     ),
                                     children: [
-                                      const TextSpan(text: 'New patient? '),
+                                      const TextSpan(text: 'Already registered at the hospital? '),
                                       TextSpan(
-                                        text: 'Register at hospital reception.',
+                                        text: 'Sign up with your registered mobile number.',
                                         style: AppTypography.raleway(
                                           color: AppColors.primaryRed,
                                           fontWeight: FontWeight.w700,
                                         ),
+                                        recognizer: TapGestureRecognizer()
+                                          ..onTap = () => Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      const SignUpScreen(),
+                                                ),
+                                              ),
                                       ),
                                     ],
                                   ),

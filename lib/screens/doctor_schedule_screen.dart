@@ -15,6 +15,7 @@ import '../models/doctors_model.dart';
 import '../models/local_appointment.dart';
 import '../services/auth_service.dart';
 import '../services/doctors_service.dart';
+import '../services/appointment_service.dart';
 import '../services/booking_service.dart';
 
 class DoctorScheduleScreen extends StatefulWidget {
@@ -25,6 +26,9 @@ class DoctorScheduleScreen extends StatefulWidget {
   final bool? isForSelf;
   final int departmentId;
   final bool isLoggedIn;
+  final bool isRescheduleMode;
+  final String? rescheduleAppointmentId;
+  final String? rescheduleReason;
 
   const DoctorScheduleScreen({
     super.key,
@@ -35,6 +39,9 @@ class DoctorScheduleScreen extends StatefulWidget {
     required this.departmentId,
     this.isForSelf,
     this.isLoggedIn = false,
+    this.isRescheduleMode = false,
+    this.rescheduleAppointmentId,
+    this.rescheduleReason,
   });
 
   @override
@@ -43,6 +50,7 @@ class DoctorScheduleScreen extends StatefulWidget {
 
 bool _isBookingInProgress = false;
 final BookingService _bookingService = BookingService();
+final AppointmentService _appointmentService = AppointmentService();
 
 class _DoctorScheduleScreenState extends State<DoctorScheduleScreen> {
   final DoctorService _doctorService = DoctorService();
@@ -472,7 +480,13 @@ void _showBookingConfirmationDialog(DoctorSchedule schedule) {
                   ),
                 ),
                 child: Text(
-                  _isBookingInProgress ? 'Booking...' : 'Confirm Booking',
+                  _isBookingInProgress
+                      ? (widget.isRescheduleMode
+                          ? 'Submitting...'
+                          : 'Booking...')
+                      : (widget.isRescheduleMode
+                          ? 'Submit Reschedule Request'
+                          : 'Confirm Booking'),
                   style: AppTypography.roboto(fontWeight: FontWeight.w700),
                 ),
               ),
@@ -532,6 +546,15 @@ Future<void> _bookAppointment(
   });
 
   try {
+    if (widget.isRescheduleMode) {
+      await _submitRescheduleRequest(
+        schedule: schedule,
+        dialogContext: dialogContext,
+        formattedScheduleForDb: formattedScheduleForDb,
+      );
+      return;
+    }
+
     String patientNameForBooking;
     String phoneNo;
     String mrNo;
@@ -685,6 +708,46 @@ Future<void> _bookAppointment(
       _isBookingInProgress = false;
     });
   }
+}
+
+Future<void> _submitRescheduleRequest({
+  required DoctorSchedule schedule,
+  required BuildContext dialogContext,
+  required String formattedScheduleForDb,
+}) async {
+  final appointmentId = widget.rescheduleAppointmentId?.trim() ?? '';
+  final reason = widget.rescheduleReason?.trim() ?? '';
+
+  if (appointmentId.isEmpty || reason.isEmpty) {
+    Navigator.pop(dialogContext);
+    _showErrorDialog('Reschedule details are incomplete.');
+    return;
+  }
+
+  if (!widget.isLoggedIn) {
+    await DatabaseHelper().updateAppointmentStatus(
+      appointmentId: appointmentId,
+      status: 'Reschedule Pending',
+      purposeAppend:
+          '[RESCHEDULE REQUEST: weekId=${schedule.weekId}, time=$formattedScheduleForDb, reason=$reason]',
+    );
+    Navigator.pop(dialogContext);
+    if (mounted) Navigator.pop(context, true);
+    return;
+  }
+
+  await _appointmentService.requestReschedule(
+    appointmentId: appointmentId,
+    mrNo: widget.patientMrNo,
+    reason: reason,
+    weekId: schedule.weekId ?? 0,
+    appointmentTime: formattedScheduleForDb,
+    doctorId: widget.doctorId,
+    departmentId: widget.departmentId,
+  );
+
+  Navigator.pop(dialogContext);
+  if (mounted) Navigator.pop(context, true);
 }
 
 // Add this helper method for guest success dialog
@@ -986,7 +1049,7 @@ Widget build(BuildContext context) {
         onPressed: () => Navigator.pop(context),
       ),
       title: Text(
-        'Book Appointment',
+        widget.isRescheduleMode ? 'Reschedule Appointment' : 'Book Appointment',
         style: AppTypography.raleway(
           fontSize: 20,
           fontWeight: FontWeight.w600,

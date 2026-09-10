@@ -1,11 +1,16 @@
 import 'dart:convert';
 
 import 'package:btih_andriod_app/models/local_appointment.dart';
+import 'package:btih_andriod_app/screens/doctor_schedule_screen.dart';
+import 'package:btih_andriod_app/services/appointment_service.dart';
 import 'package:btih_andriod_app/services/guest_session.dart';
+import 'package:btih_andriod_app/services/notification_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
+import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
+import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:btih_andriod_app/utils/dashboard_helpers.dart';
 import 'package:btih_andriod_app/utils/database_helper.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
@@ -15,12 +20,18 @@ class AppointmentsInfoScreen extends StatefulWidget {
   final String patientMrNo;
   final String patientName;
   final bool isGuestMode;
+  final String? focusAppointmentId;
+  final int? focusWeekId;
+  final String? focusAppointmentTime;
 
   const AppointmentsInfoScreen({
     super.key,
     required this.patientMrNo,
     required this.patientName,
     this.isGuestMode = false,
+    this.focusAppointmentId,
+    this.focusWeekId,
+    this.focusAppointmentTime,
   });
 
   @override
@@ -34,6 +45,9 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
   bool _isLoading = true;
   String? _error;
   int _selectedTabIndex = 0;
+  bool _didOpenFocusedAppointment = false;
+  final AppointmentService _appointmentService = AppointmentService();
+  bool _actionInProgress = false;
 
   @override
   void initState() {
@@ -69,6 +83,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
           _isLoading = false;
           _error = null;
         });
+        _maybeOpenFocusedAppointment();
       } else if (response.statusCode == 404) {
         setState(() {
           _allAppointments = [];
@@ -114,6 +129,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
         _splitAppointments();
         _isLoading = false;
       });
+      _maybeOpenFocusedAppointment();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -134,6 +150,8 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
       appointmentTime: local.appointmentTime,
       status: local.status,
       doctorName: local.doctorName,
+      doctorId: local.doctorId,
+      departmentId: local.departmentId,
       purpose: local.purpose,
       createdAt: local.createdAt,
     );
@@ -251,6 +269,8 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
         return const Color(0xFF26A69A);
       case 'cancelled':
         return AppColors.primaryRed;
+      case 'reschedule pending':
+        return const Color(0xFF6A1B9A);
       default:
         return AppColors.greyText;
     }
@@ -266,13 +286,517 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
         return const Color(0xFFE0F2F1);
       case 'cancelled':
         return AppColors.softRed;
+      case 'reschedule pending':
+        return const Color(0xFFF3E5F5);
       default:
         return AppColors.fieldFill;
     }
   }
 
+  bool _canManageAppointment(Appointment appointment) {
+    final status = appointment.status.toLowerCase();
+    return status == 'pending' || status == 'confirmed';
+  }
+
+  Future<String?> _promptReasonDialog({
+    required String title,
+    required String hint,
+  }) async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final reason = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            title,
+            style: AppTypography.raleway(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.deepRed,
+            ),
+          ),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              maxLines: 3,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: AppTypography.roboto(
+                  fontSize: 14,
+                  color: AppColors.greyText,
+                ),
+                enabledBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.hairline),
+                ),
+                focusedBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.primaryRed, width: 2),
+                ),
+              ),
+              validator: (value) {
+                final trimmed = value?.trim() ?? '';
+                if (trimmed.isEmpty) return 'Reason is required';
+                if (trimmed.length < 5) {
+                  return 'Please enter at least 5 characters';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(
+                'Back',
+                style: AppTypography.roboto(color: AppColors.greyText),
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() != true) return;
+                Navigator.pop(dialogContext, controller.text.trim());
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primaryRed,
+              ),
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+    return reason;
+  }
+
+  Future<bool> _confirmCancelDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'Cancel appointment?',
+            style: AppTypography.raleway(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.deepRed,
+            ),
+          ),
+          content: Text(
+            'This will cancel your appointment immediately. This action cannot be undone.',
+            style: AppTypography.roboto(
+              fontSize: 14,
+              color: AppColors.greyText,
+              height: 1.4,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(
+                'Keep appointment',
+                style: AppTypography.roboto(color: AppColors.greyText),
+              ),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primaryRed,
+              ),
+              child: const Text('Yes, cancel'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _handleCancelAppointment(
+    Appointment appointment,
+    BuildContext sheetContext,
+  ) async {
+    if (_actionInProgress) return;
+
+    final reason = await _promptReasonDialog(
+      title: 'Cancellation reason',
+      hint: 'Tell us why you need to cancel',
+    );
+    if (reason == null || !mounted) return;
+
+    final confirmed = await _confirmCancelDialog();
+    if (!confirmed || !mounted) return;
+
+    setState(() => _actionInProgress = true);
+
+    try {
+      if (widget.isGuestMode) {
+        await DatabaseHelper().updateAppointmentStatus(
+          appointmentId: appointment.appointmentId,
+          status: 'Cancelled',
+          purposeAppend: '[CANCELLED BY PATIENT: $reason]',
+        );
+      } else {
+        if (appointment.appointmentId.isEmpty) {
+          throw Exception('Appointment ID is missing');
+        }
+        await _appointmentService.cancelAppointment(
+          appointmentId: appointment.appointmentId,
+          mrNo: widget.patientMrNo,
+          reason: reason,
+        );
+      }
+
+      if (!mounted) return;
+      Navigator.pop(sheetContext);
+
+      if (widget.patientMrNo.isNotEmpty) {
+        await NotificationService.instance.notifyAppointmentCancelled(
+          mrNo: widget.patientMrNo,
+          doctorName: appointment.doctorName,
+          appointmentTime: appointment.appointmentTime,
+        );
+      }
+
+      CustomMessageDialog.showSuccess(
+        context,
+        'Your appointment has been cancelled.',
+      );
+      await _fetchAppointments();
+    } catch (e) {
+      if (mounted) {
+        CustomMessageDialog.showError(
+          context,
+          e.toString().replaceFirst('Exception: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _actionInProgress = false);
+    }
+  }
+
+  Future<void> _handleRescheduleAppointment(
+    Appointment appointment,
+    BuildContext sheetContext,
+  ) async {
+    if (_actionInProgress) return;
+
+    if (appointment.doctorId <= 0) {
+      CustomMessageDialog.showError(
+        context,
+        'Doctor information is missing for this appointment. Please contact the hospital.',
+      );
+      return;
+    }
+
+    final reason = await _promptReasonDialog(
+      title: 'Reschedule reason',
+      hint: 'Tell us why you need to reschedule',
+    );
+    if (reason == null || !mounted) return;
+
+    Navigator.pop(sheetContext);
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DoctorScheduleScreen(
+          doctorId: appointment.doctorId,
+          doctorName: appointment.doctorName,
+          patientMrNo: widget.patientMrNo,
+          patientName: widget.patientName,
+          departmentId: appointment.departmentId,
+          isLoggedIn: !widget.isGuestMode,
+          isForSelf: true,
+          isRescheduleMode: true,
+          rescheduleAppointmentId: appointment.appointmentId,
+          rescheduleReason: reason,
+        ),
+      ),
+    );
+
+    if (result == true && mounted) {
+      CustomMessageDialog.showSuccess(
+        context,
+        'Reschedule request submitted. You will be notified once admin approves it.',
+      );
+      await _fetchAppointments();
+    }
+  }
+
   List<Appointment> get _visibleAppointments =>
       _selectedTabIndex == 0 ? _upcomingAppointments : _pastAppointments;
+
+  bool get _hasFocusTarget =>
+      (widget.focusAppointmentId != null &&
+          widget.focusAppointmentId!.isNotEmpty) ||
+      (widget.focusWeekId != null &&
+          widget.focusAppointmentTime != null &&
+          widget.focusAppointmentTime!.isNotEmpty);
+
+  Appointment? _findFocusedAppointment() {
+    if (!_hasFocusTarget || _allAppointments.isEmpty) return null;
+
+    if (widget.focusAppointmentId != null &&
+        widget.focusAppointmentId!.isNotEmpty) {
+      for (final appt in _allAppointments) {
+        if (appt.appointmentId == widget.focusAppointmentId) return appt;
+      }
+    }
+
+    if (widget.focusWeekId != null &&
+        widget.focusAppointmentTime != null &&
+        widget.focusAppointmentTime!.isNotEmpty) {
+      for (final appt in _allAppointments) {
+        if (appt.weekId == widget.focusWeekId &&
+            appt.appointmentTime == widget.focusAppointmentTime) {
+          return appt;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  void _maybeOpenFocusedAppointment() {
+    if (_didOpenFocusedAppointment || !_hasFocusTarget || !mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _didOpenFocusedAppointment) return;
+      final focused = _findFocusedAppointment();
+      if (focused == null) return;
+
+      _didOpenFocusedAppointment = true;
+      setState(() => _selectedTabIndex = 0);
+      _showAppointmentDetails(focused);
+    });
+  }
+
+  void _showAppointmentDetails(Appointment appointment) {
+    final statusColor = _statusColor(appointment.status);
+    final statusBg = _statusBackground(appointment.status);
+    final department = DashboardHelpers.sanitizeLabel(appointment.purpose);
+    final doctor = DashboardHelpers.normalizeDoctorName(appointment.doctorName);
+    final displayId = appointment.appointmentId.isNotEmpty
+        ? appointment.appointmentId
+        : appointment.weekId.toString();
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.hairline,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.softRed,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.calendar_month_outlined,
+                        color: AppColors.primaryRed,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Appointment #$displayId',
+                            style: AppTypography.raleway(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.deepRed,
+                            ),
+                          ),
+                          Text(
+                            _formatCardDate(appointment),
+                            style: AppTypography.roboto(
+                              fontSize: 12,
+                              color: AppColors.greyText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        appointment.status.isEmpty
+                            ? 'Unknown'
+                            : appointment.status,
+                        style: AppTypography.raleway(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildDetailRow(
+                  Icons.access_time_rounded,
+                  _formatTimeLine(appointment),
+                ),
+                const SizedBox(height: 8),
+                _buildDetailRow(Icons.person_outline_rounded, doctor),
+                if (department != null) ...[
+                  const SizedBox(height: 8),
+                  _buildDetailRow(Icons.place_outlined, department),
+                ],
+                if (_canManageAppointment(appointment)) ...[
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TapFeedback(
+                          onTap: _actionInProgress
+                              ? null
+                              : () => _handleRescheduleAppointment(
+                                    appointment,
+                                    sheetContext,
+                                  ),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: AppColors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.primaryRed),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              'Reschedule',
+                              style: AppTypography.raleway(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.primaryRed,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TapFeedback(
+                          onTap: _actionInProgress
+                              ? null
+                              : () => _handleCancelAppointment(
+                                    appointment,
+                                    sheetContext,
+                                  ),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryRed,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              'Cancel',
+                              style: AppTypography.raleway(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else if (appointment.status.toLowerCase() ==
+                    'reschedule pending') ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3E5F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: const Color(0xFF6A1B9A).withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Text(
+                      'Your reschedule request is awaiting admin approval.',
+                      style: AppTypography.roboto(
+                        fontSize: 13,
+                        color: const Color(0xFF6A1B9A),
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(sheetContext),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.greyText,
+                      side: const BorderSide(color: AppColors.hairline),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Close',
+                      style: AppTypography.raleway(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -456,7 +980,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
         color: AppColors.white,
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          onTap: () {},
+          onTap: () => _showAppointmentDetails(appointment),
           borderRadius: BorderRadius.circular(16),
           child: Ink(
             padding: const EdgeInsets.all(14),
@@ -652,6 +1176,8 @@ class Appointment {
   final String appointmentTime;
   final String status;
   final String doctorName;
+  final int doctorId;
+  final int departmentId;
   final String purpose;
   final String createdAt;
 
@@ -665,6 +1191,8 @@ class Appointment {
     required this.appointmentTime,
     required this.status,
     required this.doctorName,
+    this.doctorId = 0,
+    this.departmentId = 0,
     required this.purpose,
     required this.createdAt,
   });
@@ -680,8 +1208,14 @@ class Appointment {
       appointmentTime: json['appointmentTime'] ?? '',
       status: json['status'] ?? '',
       doctorName: json['doctorName'] ?? '',
+      doctorId: json['doctorId'] is int
+          ? json['doctorId'] as int
+          : int.tryParse(json['doctorId']?.toString() ?? '') ?? 0,
+      departmentId: json['departmentId'] is int
+          ? json['departmentId'] as int
+          : int.tryParse(json['departmentId']?.toString() ?? '') ?? 0,
       purpose: json['purpose'] ?? '',
-      createdAt: json['createdAt'] ?? '',
+      createdAt: json['createdAt']?.toString() ?? '',
     );
   }
 }

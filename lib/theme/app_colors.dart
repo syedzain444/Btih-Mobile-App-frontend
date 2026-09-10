@@ -35,6 +35,20 @@ class AppColors {
   static const Color info = Color(0xFFC24957);
   static const Color infoBg = Color(0xFFEDD5D9);
 
+  // Dashboard health snapshot + activity accents (match design mockup)
+  static const Color medsTeal = Color(0xFF2B7A74);
+  static const Color medsTealBg = Color(0xFFD9EFEB);
+  static const Color medsCardBg = Color(0xFFEEF8F6);
+  static const Color activityPurple = Color(0xFF6A4C93);
+  static const Color activityPurpleBg = Color(0xFFEAE3F3);
+
+  /// Recent-activity timeline — pink, purple, teal (mockup order).
+  static const List<({Color icon, Color background})> activityPalette = [
+    (icon: primaryRed, background: softRed),
+    (icon: activityPurple, background: activityPurpleBg),
+    (icon: medsTeal, background: medsTealBg),
+  ];
+
   /// Horizontal brand gradient — login header, app bars, welcome accents.
   static const LinearGradient brandGradient = LinearGradient(
     colors: [rustRed, primaryRed, deepRed],

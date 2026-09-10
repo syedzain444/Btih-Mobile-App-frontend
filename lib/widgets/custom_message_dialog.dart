@@ -329,6 +329,144 @@ class CustomMessageDialog {
     );
   }
 
+  static void showNotRegisteredPatient(
+    BuildContext context, {
+    required String phoneDisplay,
+    VoidCallback? onContinue,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryRed,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: AppColors.white,
+                    size: 36,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Oops!',
+                  style: AppTypography.montserrat(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.darkText,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'There is no patient registered on provided mobile number',
+                  textAlign: TextAlign.center,
+                  style: AppTypography.roboto(
+                    fontSize: 14,
+                    color: AppColors.greyText,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  phoneDisplay,
+                  textAlign: TextAlign.center,
+                  style: AppTypography.raleway(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.darkText,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                      onContinue?.call();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryRed,
+                      foregroundColor: AppColors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(28),
+                      ),
+                    ),
+                    child: Text(
+                      'Continue',
+                      style: AppTypography.raleway(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static Future<void> showAlreadyRegisteredLogin(
+    BuildContext context, {
+    required VoidCallback onLogin,
+    VoidCallback? onForgotPassword,
+  }) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Account Already Registered',
+          style: AppTypography.montserrat(
+            fontWeight: FontWeight.w700,
+            color: AppColors.primaryRed,
+          ),
+        ),
+        content: Text(
+          'This mobile number already has a portal account. Please log in or reset your password.',
+          style: AppTypography.roboto(fontSize: 14, color: AppColors.greyText),
+        ),
+        actions: [
+          if (onForgotPassword != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                onForgotPassword();
+              },
+              child: const Text('Forgot Password'),
+            ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              onLogin();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryRed,
+              foregroundColor: AppColors.white,
+            ),
+            child: const Text('Log In'),
+          ),
+        ],
+      ),
+    );
+  }
+
   static void showLoading(BuildContext context, String message) {
     showDialog(
       context: context,

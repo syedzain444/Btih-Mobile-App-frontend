@@ -8,6 +8,7 @@ import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:btih_andriod_app/widgets/login_wave_header.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sms_autofill/sms_autofill.dart';
@@ -33,9 +34,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
   bool _obscureNew = true;
   bool _obscureConfirm = true;
   String? _verifiedMrNo;
-  String? _resetToken;
 
-  int _start = 60;
+  int _start = 120;
   Timer? _timer;
   bool _canResend = false;
 
@@ -46,6 +46,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
   }
 
   void _listenForSmsOtp() {
+    if (kIsWeb) return;
     try {
       listenForCode();
     } catch (_) {
@@ -66,7 +67,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
 
   @override
   void dispose() {
-    cancel();
+    if (!kIsWeb) {
+      cancel();
+    }
     _phoneController.dispose();
     _otpController.dispose();
     _newPasswordController.dispose();
@@ -75,9 +78,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
     super.dispose();
   }
 
-  void _startTimer() {
+  void _startTimer({int seconds = 120}) {
     setState(() {
-      _start = 60;
+      _start = seconds;
       _canResend = false;
     });
     _timer?.cancel();
@@ -93,25 +96,50 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
     });
   }
 
-  Future<void> _sendOtp() async {
+  Future<bool> _sendOtp({bool showSuccessDialog = true}) async {
     setState(() => _isSendingOtp = true);
     try {
       final response = await _authService.sendOtp(_phoneController.text.trim());
-      if (!mounted) return;
-      _startTimer();
-      if (_step == 2) {
+      if (!mounted) return false;
+
+      final expiresInMinutes = int.tryParse(
+        response['expiresInMinutes']?.toString() ?? '',
+      );
+      _startTimer(
+        seconds: expiresInMinutes != null && expiresInMinutes > 0
+            ? expiresInMinutes * 60
+            : 120,
+      );
+
+      if (_step >= 2) {
         _listenForSmsOtp();
       }
-      CustomMessageDialog.showSuccess(
-        context,
-        response['message']?.toString() ?? 'OTP sent successfully',
-      );
+
+      if (showSuccessDialog) {
+        final debugOtp = AuthService.extractDebugOtp(response);
+        final smsDelivered = response['smsDelivered'];
+        final baseMessage =
+            response['message']?.toString() ?? 'OTP sent successfully';
+        final message = debugOtp != null
+            ? '$baseMessage\n\nYour verification code: $debugOtp'
+            : baseMessage;
+
+        if (debugOtp != null || smsDelivered == false) {
+          _otpController.text = debugOtp ?? _otpController.text;
+        }
+
+        CustomMessageDialog.showSuccess(context, message);
+      }
+
+      return true;
     } on AuthApiException catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       CustomMessageDialog.showError(context, e.message);
+      return false;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       CustomMessageDialog.showError(context, 'Error sending OTP: $e');
+      return false;
     } finally {
       if (mounted) setState(() => _isSendingOtp = false);
     }
@@ -133,8 +161,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
         _verifiedMrNo = response['mrNo']?.toString() ??
             response['mr_no']?.toString();
       });
-      await _sendOtp();
-      if (!mounted) return;
+
+      final otpSent = await _sendOtp(showSuccessDialog: true);
+      if (!mounted || !otpSent) return;
+
       setState(() => _step = 2);
       _listenForSmsOtp();
     } on AuthApiException catch (e) {
@@ -165,23 +195,20 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
       if (!mounted) return;
       _timer?.cancel();
 
-      final resetToken = AuthService.extractResetToken(response);
-      if (resetToken == null || resetToken.isEmpty) {
+      final mrNo = response['mrNo']?.toString() ??
+          response['mr_no']?.toString() ??
+          _verifiedMrNo;
+      if (mrNo == null || mrNo.isEmpty) {
         CustomMessageDialog.showError(
           context,
-          'OTP verified but reset token was not returned.\n\n'
-          'Do not verify OTP in Swagger while using the app — verify only here.\n'
-          'If this keeps happening, redeploy the latest API.',
+          'OTP verified but patient MR number was not returned. Please start again.',
         );
         return;
       }
 
       setState(() {
         _step = 3;
-        _resetToken = resetToken;
-        _verifiedMrNo = response['mrNo']?.toString() ??
-            response['mr_no']?.toString() ??
-            _verifiedMrNo;
+        _verifiedMrNo = mrNo;
       });
       CustomMessageDialog.showSuccess(
         context,
@@ -220,17 +247,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
       CustomMessageDialog.showError(context, 'Patient verification expired. Please start again.');
       return;
     }
-    if (_resetToken == null || _resetToken!.isEmpty) {
-      CustomMessageDialog.showError(context, 'Reset token missing. Please verify OTP again.');
-      return;
-    }
 
     setState(() => _isLoading = true);
     try {
       final response = await _authService.updatePassword(
         mrno: _verifiedMrNo!,
         patientPassword: newPassword,
-        resetToken: _resetToken!,
       );
       if (!mounted) return;
       CustomMessageDialog.showSuccess(

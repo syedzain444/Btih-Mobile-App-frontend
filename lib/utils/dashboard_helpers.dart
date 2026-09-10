@@ -61,6 +61,50 @@ class DashboardHelpers {
     }
   }
 
+  /// Splits API schedule text into non-repeating day + time labels.
+  static ({String dayLabel, String timeLabel}) parseAppointmentSchedule(
+    String raw,
+  ) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return (dayLabel: 'Date pending', timeLabel: 'Time pending');
+    }
+
+    try {
+      final dt = DateTime.parse(trimmed);
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      const weekdays = [
+        'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+        'Friday', 'Saturday', 'Sunday',
+      ];
+      final dayLabel =
+          '${weekdays[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} ${dt.year}';
+      final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+      final period = dt.hour >= 12 ? 'PM' : 'AM';
+      final minute = dt.minute.toString().padLeft(2, '0');
+      return (dayLabel: dayLabel, timeLabel: '$hour:$minute $period');
+    } catch (_) {}
+
+    final weekdaySplit = RegExp(r'^([A-Za-z]+)\s*:\s*(.+)$').firstMatch(trimmed);
+    if (weekdaySplit != null) {
+      final day = weekdaySplit.group(1)!.trim();
+      final time = weekdaySplit.group(2)!.trim().replaceAll('-', '–');
+      return (dayLabel: day, timeLabel: time);
+    }
+
+    if (trimmed.contains('T')) {
+      return (
+        dayLabel: formatAppointmentDate(trimmed),
+        timeLabel: formatAppointmentTime(trimmed),
+      );
+    }
+
+    return (dayLabel: trimmed, timeLabel: '');
+  }
+
   static String? sanitizeLabel(String? value) {
     if (value == null) return null;
     final trimmed = value.trim();

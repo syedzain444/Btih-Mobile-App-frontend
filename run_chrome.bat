@@ -1,8 +1,3 @@
 @echo off
-REM Run Flutter web on Chrome with flags for the hospital API self-signed HTTPS cert.
-cd /d "%~dp0"
-flutter run -d chrome ^
-  --web-browser-flag "--ignore-certificate-errors" ^
-  --web-browser-flag "--ignore-urlfetcher-cert-requests" ^
-  --web-browser-flag "--disable-web-security" ^
-  --web-browser-flag "--user-data-dir=%TEMP%\btih_chrome_dev"
+REM Shortcut — same as run_chrome_local_dev.bat (starts API if needed).
+call "%~dp0..\run-dev.bat" chrome

@@ -1,5 +1,7 @@
+import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
@@ -42,8 +44,6 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
   String? _selectedGender;
   String _dobLabel = 'Not available';
   String _dateOfBirthRaw = '';
-
-  static const double _fieldHeight = 48;
 
   static const List<String> _bloodGroups = [
     'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-',
@@ -212,6 +212,12 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
       final bodyText = response.body.trim();
 
       if (response.statusCode == 200) {
+        if (widget.isLoggedIn) {
+          await AuthSession.updateProfileName(
+            firstName: _firstNameController.text.trim(),
+            lastName: _lastNameController.text.trim(),
+          );
+        }
         CustomMessageDialog.showSuccess(
           context,
           _extractApiMessage(bodyText, response.statusCode,
@@ -342,10 +348,12 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     }
   }
 
-  String get _displayName {
-    final first = _firstNameController.text.trim();
-    final last = _lastNameController.text.trim();
-    return '$first $last'.trim().isEmpty ? 'Patient' : '$first $last'.trim();
+  TextStyle _fieldLabelStyle(bool active) {
+    return AppTypography.roboto(
+      fontSize: 13,
+      fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+      color: active ? AppColors.deepRed : AppColors.greyText,
+    );
   }
 
   @override
@@ -387,63 +395,52 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
           ),
         ],
       ),
-      body: isLoading
-          ? _buildLoadingShimmer()
-          : errorMessage.isNotEmpty
-              ? _buildErrorWidget()
-              : _buildProfileContent(),
+      body: ColoredBox(
+        color: AppColors.blush,
+        child: isLoading
+            ? _buildLoadingShimmer()
+            : errorMessage.isNotEmpty
+                ? _buildErrorWidget()
+                : _buildProfileContent(),
+      ),
     );
   }
 
   Widget _buildUpdateButton() {
-    return TapFeedback(
-      onTap: isSaving ? null : _updateProfile,
-      borderRadius: BorderRadius.circular(14),
-      materialColor: AppColors.primaryRed,
-      splashColor: AppColors.white.withValues(alpha: 0.18),
-      highlightColor: AppColors.deepRed.withValues(alpha: 0.35),
-      child: Container(
-        height: 50,
-        decoration: BoxDecoration(
-          color: AppColors.primaryRed,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        alignment: Alignment.center,
-        child: isSaving
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.white,
-                ),
-              )
-            : Text(
-                'Update Profile',
-                style: AppTypography.raleway(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.white,
-                ),
-              ),
-      ),
+    return AppPrimaryButton(
+      label: 'Update Profile',
+      loading: isSaving,
+      useBrandGradient: true,
+      height: 52,
+      onPressed: isSaving ? null : _updateProfile,
     );
   }
 
   Widget _buildLoadingShimmer() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
       child: Column(
         children: List.generate(
-          5,
+          6,
           (index) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Container(
-              height: 42,
-              decoration: BoxDecoration(
-                color: AppColors.fieldFill,
-                borderRadius: BorderRadius.circular(12),
-              ),
+            padding: const EdgeInsets.only(bottom: 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 72,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: AppColors.hairline,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  height: 1.2,
+                  color: AppColors.hairline,
+                ),
+              ],
             ),
           ),
         ),
@@ -491,20 +488,19 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
       key: _formKey,
       child: SingleChildScrollView(
         physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildIdentityStrip(),
-            const SizedBox(height: 14),
+            _buildIntroBanner(),
+            const SizedBox(height: 24),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _buildTextField(
+                  child: _buildLineTextField(
                     controller: _firstNameController,
                     label: 'First Name',
-                    icon: Icons.person_outline,
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(
                         RegExp(r"[a-zA-Z\s'.-]"),
@@ -513,12 +509,11 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                     validator: (v) => _validateName(v, label: 'First name'),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 16),
                 Expanded(
-                  child: _buildTextField(
+                  child: _buildLineTextField(
                     controller: _lastNameController,
                     label: 'Last Name',
-                    icon: Icons.person_outline,
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(
                         RegExp(r"[a-zA-Z\s'.-]"),
@@ -530,58 +525,53 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 20),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _buildReadOnlyField(
+                  child: _buildReadOnlyLineField(
                     label: 'MR No.',
                     value: widget.mrNo,
-                    icon: Icons.badge_outlined,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 16),
                 Expanded(
-                  child: _buildReadOnlyField(
+                  child: _buildReadOnlyLineField(
                     label: 'Date of Birth',
                     value: _dobLabel,
-                    icon: Icons.cake_outlined,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            _buildTextField(
+            const SizedBox(height: 20),
+            _buildLineTextField(
               controller: _cnicController,
               label: 'CNIC',
-              icon: Icons.credit_card_outlined,
               keyboardType: TextInputType.number,
-              hintText: '12345-1234567-1',
               inputFormatters: [CnicInputFormatter()],
               validator: _validateCnic,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 20),
             _buildGenderSelector(),
-            const SizedBox(height: 10),
+            const SizedBox(height: 20),
             _buildBloodGroupSelector(),
-            const SizedBox(height: 10),
-            _buildTextField(
+            const SizedBox(height: 20),
+            _buildLineTextField(
               controller: _contactController,
-              label: 'Contact',
-              icon: Icons.phone_outlined,
+              label: 'Contact Number',
               keyboardType: TextInputType.phone,
               validator: (v) => v == null || v.trim().isEmpty
                   ? 'Contact is required'
                   : null,
             ),
-            const SizedBox(height: 10),
-            _buildTextField(
+            const SizedBox(height: 20),
+            _buildLineTextField(
               controller: _emailController,
               label: 'Email',
-              icon: Icons.email_outlined,
               keyboardType: TextInputType.emailAddress,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 32),
             _buildUpdateButton(),
           ],
         ),
@@ -589,12 +579,19 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     );
   }
 
-  Widget _buildIdentityStrip() {
+  Widget _buildIntroBanner() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.fieldFill,
-        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: [
+            AppColors.deepRed.withValues(alpha: 0.08),
+            AppColors.softRed.withValues(alpha: 0.5),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.fieldBorder),
       ),
       child: Row(
@@ -603,46 +600,35 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: AppColors.softRed,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: AppColors.primaryRed.withValues(alpha: 0.15),
-              ),
+              gradient: AppColors.heroGradient,
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: Center(
-              child: Text(
-                _displayName.isNotEmpty ? _displayName[0].toUpperCase() : 'P',
-                style: AppTypography.montserrat(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.primaryRed,
-                ),
-              ),
+            child: const Icon(
+              Icons.manage_accounts_outlined,
+              color: AppColors.white,
+              size: 24,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _displayName,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                  'Your profile details',
                   style: AppTypography.raleway(
-                    fontSize: 17,
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.darkText,
-                    height: 1.2,
+                    color: AppColors.deepRed,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 Text(
-                  'MR No: ${widget.mrNo}',
+                  'Keep your personal information up to date.',
                   style: AppTypography.roboto(
                     fontSize: 13,
-                    fontWeight: FontWeight.w500,
                     color: AppColors.greyText,
+                    height: 1.35,
                   ),
                 ),
               ],
@@ -658,49 +644,34 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
       initialValue: _selectedGender,
       validator: (_) => _validateGender(),
       builder: (state) {
+        final borderColor = state.hasError
+            ? AppColors.primaryRed.withValues(alpha: 0.7)
+            : AppColors.hairline;
+
+        final hasSelection = _selectedGender != null;
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Gender',
-              style: AppTypography.roboto(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppColors.greyText,
-              ),
+            AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 200),
+              style: _fieldLabelStyle(hasSelection),
+              child: const Text('Gender'),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 10),
             Row(
               children: _genderOptions.map((option) {
                 final selected = _selectedGender == option.key;
                 return Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      right: option.key == 'M' ? 6 : 0,
-                      left: option.key == 'F' ? 6 : 0,
-                    ),
-                    child: TapFeedback(
-                      onTap: () {
-                        setState(() => _selectedGender = option.key);
-                        state.didChange(option.key);
-                      },
-                      borderRadius: BorderRadius.circular(12),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        height: _fieldHeight,
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? AppColors.softRed
-                              : AppColors.fieldFill,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: selected
-                                ? AppColors.primaryRed
-                                : AppColors.fieldBorder,
-                            width: selected ? 1.5 : 1,
-                          ),
-                        ),
-                        child: Row(
+                  child: TapFeedback(
+                    onTap: () {
+                      setState(() => _selectedGender = option.key);
+                      state.didChange(option.key);
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Column(
+                      children: [
+                        Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
@@ -716,8 +687,10 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                             Text(
                               option.value,
                               style: AppTypography.roboto(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
                                 color: selected
                                     ? AppColors.primaryRed
                                     : AppColors.darkText,
@@ -725,19 +698,33 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                             ),
                           ],
                         ),
-                      ),
+                        const SizedBox(height: 10),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          height: selected ? 2 : 0,
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryRed,
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 );
               }).toList(),
             ),
+            Container(
+              height: 1.2,
+              color: borderColor,
+            ),
             if (state.hasError)
               Padding(
-                padding: const EdgeInsets.only(top: 4, left: 4),
+                padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   state.errorText!,
                   style: AppTypography.roboto(
-                    fontSize: 11,
+                    fontSize: 12,
                     color: AppColors.primaryRed,
                   ),
                 ),
@@ -754,72 +741,64 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
       validator: (_) => _validateBloodGroup(),
       builder: (state) {
         final hasValue = _selectedBloodGroup != null;
+        final borderColor = state.hasError
+            ? AppColors.primaryRed.withValues(alpha: 0.7)
+            : AppColors.hairline;
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Blood Group',
-              style: AppTypography.roboto(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppColors.greyText,
-              ),
-            ),
-            const SizedBox(height: 6),
             TapFeedback(
               onTap: () => _showBloodGroupPicker(state),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                height: _fieldHeight,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.fieldFill,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: state.hasError
-                        ? AppColors.primaryRed.withValues(alpha: 0.6)
-                        : AppColors.fieldBorder,
+              borderRadius: BorderRadius.circular(4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 200),
+                    style: _fieldLabelStyle(hasValue),
+                    child: const Text('Blood Group'),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.bloodtype_outlined,
-                      color: AppColors.greyText,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        hasValue ? _selectedBloodGroup! : 'Tap to select',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTypography.roboto(
-                          fontSize: 14,
-                          fontWeight:
-                              hasValue ? FontWeight.w600 : FontWeight.w400,
-                          color: hasValue
-                              ? AppColors.darkText
-                              : AppColors.greyText.withValues(alpha: 0.75),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          hasValue ? _selectedBloodGroup! : 'Select blood group',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.roboto(
+                            fontSize: 15,
+                            fontWeight:
+                                hasValue ? FontWeight.w500 : FontWeight.w400,
+                            color: hasValue
+                                ? AppColors.darkText
+                                : AppColors.greyText,
+                          ),
                         ),
                       ),
-                    ),
-                    const Icon(
-                      Icons.expand_more_rounded,
-                      color: AppColors.primaryRed,
-                      size: 22,
-                    ),
-                  ],
-                ),
+                      Icon(
+                        Icons.expand_more_rounded,
+                        color: AppColors.greyText,
+                        size: 22,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    height: 1.2,
+                    color: borderColor,
+                  ),
+                ],
               ),
             ),
             if (state.hasError)
               Padding(
-                padding: const EdgeInsets.only(top: 4, left: 4),
+                padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   state.errorText!,
                   style: AppTypography.roboto(
-                    fontSize: 11,
+                    fontSize: 12,
                     color: AppColors.primaryRed,
                   ),
                 ),
@@ -830,127 +809,98 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     );
   }
 
-  InputDecoration _fieldDecoration({
-    required IconData icon,
-    String? hintText,
-  }) {
+  InputDecoration _lineFieldDecoration({bool hasError = false}) {
+    final errorSide = BorderSide(
+      color: AppColors.primaryRed.withValues(alpha: 0.7),
+    );
+    const normalSide = BorderSide(color: AppColors.hairline, width: 1.2);
+    const focusedSide = BorderSide(color: AppColors.primaryRed, width: 2);
+
     return InputDecoration(
-      hintText: hintText,
-      hintStyle: AppTypography.roboto(
-        fontSize: 14,
-        color: AppColors.greyText.withValues(alpha: 0.7),
+      isDense: true,
+      filled: false,
+      contentPadding: const EdgeInsets.only(top: 2, bottom: 12),
+      enabledBorder: UnderlineInputBorder(
+        borderSide: hasError ? errorSide : normalSide,
       ),
-      prefixIcon: Icon(icon, color: AppColors.greyText, size: 20),
-      filled: true,
-      fillColor: AppColors.fieldFill,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.fieldBorder),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.fieldBorder),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.primaryRed, width: 1.5),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: AppColors.primaryRed.withValues(alpha: 0.6)),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.primaryRed, width: 1.5),
+      focusedBorder: const UnderlineInputBorder(borderSide: focusedSide),
+      errorBorder: UnderlineInputBorder(borderSide: errorSide),
+      focusedErrorBorder: const UnderlineInputBorder(borderSide: focusedSide),
+      errorStyle: AppTypography.roboto(
+        fontSize: 12,
+        color: AppColors.primaryRed,
       ),
     );
   }
 
-  Widget _buildTextField({
+  Widget _buildLineTextField({
     required TextEditingController controller,
     required String label,
-    required IconData icon,
     TextInputType keyboardType = TextInputType.text,
-    String? hintText,
     List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
   }) {
+    final hasValue = controller.text.trim().isNotEmpty;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: AppTypography.roboto(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: AppColors.greyText,
-          ),
+        AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 200),
+          style: _fieldLabelStyle(hasValue),
+          child: Text(label),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         TextFormField(
           controller: controller,
           keyboardType: keyboardType,
           inputFormatters: inputFormatters,
           validator: validator,
-          textAlignVertical: TextAlignVertical.center,
           style: AppTypography.roboto(
-            fontSize: 14,
+            fontSize: 15,
             fontWeight: FontWeight.w500,
             color: AppColors.darkText,
           ),
-          decoration: _fieldDecoration(
-            icon: icon,
-            hintText: hintText,
-          ),
+          decoration: _lineFieldDecoration(),
+          onChanged: (_) {
+            if (mounted) setState(() {});
+          },
         ),
       ],
     );
   }
 
-  Widget _buildReadOnlyField({
+  Widget _buildReadOnlyLineField({
     required String label,
     required String value,
-    required IconData icon,
   }) {
+    final hasValue = value.trim().isNotEmpty &&
+        value.trim().toLowerCase() != 'not available';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 200),
+          style: _fieldLabelStyle(hasValue),
+          child: Text(label),
+        ),
+        const SizedBox(height: 4),
         Text(
-          label,
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: AppTypography.roboto(
-            fontSize: 12,
+            fontSize: 15,
             fontWeight: FontWeight.w500,
-            color: AppColors.greyText,
+            color: AppColors.greyText.withValues(alpha: 0.85),
           ),
         ),
-        const SizedBox(height: 6),
-        Container(
-          height: _fieldHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: AppColors.fieldFill.withValues(alpha: 0.65),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.fieldBorder),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: AppColors.greyText, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.roboto(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.darkText,
-                  ),
-                ),
-              ),
-            ],
-          ),
+        const SizedBox(height: 10),
+        const Divider(
+          color: AppColors.hairline,
+          height: 1,
+          thickness: 1.2,
         ),
       ],
     );

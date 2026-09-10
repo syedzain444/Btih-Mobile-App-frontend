@@ -1108,6 +1108,7 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 
 enum ReportSortOrder { newestFirst, oldestFirst }
@@ -1927,10 +1928,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       MaterialPageRoute(
         builder: (context) => Scaffold(
           backgroundColor: AppColors.scaffoldBg,
-          appBar: AppBar(
-            backgroundColor: AppColors.deepRed,
-            foregroundColor: AppColors.white,
-            elevation: 0,
+          appBar: AppAppBar(
             title: Text(
               fileName,
               style: AppTypography.raleway(
@@ -1938,10 +1936,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 fontWeight: FontWeight.w600,
                 color: AppColors.white,
               ),
-            ),
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-              onPressed: () => Navigator.pop(context),
             ),
             actions: [
               IconButton(
@@ -2162,20 +2156,45 @@ class _ReportsScreenState extends State<ReportsScreen> {
     Navigator.pop(context);
   }
 
+  PreferredSizeWidget _buildReportsHubAppBar() {
+    return AppAppBar(
+      leading: AppAppBar.backButton(context, onPressed: _handleBack),
+      title: Text(
+        'Medical Reports',
+        style: AppTypography.raleway(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: AppColors.white,
+        ),
+      ),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.white.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.assignment_outlined,
+              color: AppColors.white,
+              size: 20,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   PreferredSizeWidget _buildCategoryAppBar(int index) {
     final category = categories[index];
     final categoryName = category['name'] as String;
     final categoryIcon = category['icon'] as IconData;
 
-    return AppBar(
-      backgroundColor: AppColors.deepRed,
-      foregroundColor: AppColors.white,
-      elevation: 0,
-      centerTitle: true,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-        onPressed: _handleBack,
-      ),
+    return AppAppBar(
+      leading: AppAppBar.backButton(context, onPressed: _handleBack),
       title: Text(
         categoryName,
         style: AppTypography.raleway(
@@ -2538,24 +2557,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         backgroundColor: AppColors.scaffoldBg,
         appBar: directIndex != null
             ? _buildCategoryAppBar(directIndex)
-            : AppBar(
-                backgroundColor: AppColors.deepRed,
-                foregroundColor: AppColors.white,
-                elevation: 0,
-                centerTitle: true,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                title: Text(
-                  'Medical Reports',
-                  style: AppTypography.raleway(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.white,
-                  ),
-                ),
-              ),
+            : _buildReportsHubAppBar(),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2591,42 +2593,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (_selectedCategoryIndex == null) {
       return Scaffold(
         backgroundColor: AppColors.scaffoldBg,
-        appBar: AppBar(
-          backgroundColor: AppColors.deepRed,
-          foregroundColor: AppColors.white,
-          elevation: 0,
-          centerTitle: true,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-            onPressed: _handleBack,
-          ),
-          title: Text(
-            'Medical Reports',
-            style: AppTypography.raleway(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: AppColors.white,
-            ),
-          ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: AppColors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.assignment_outlined,
-                  color: AppColors.white,
-                  size: 20,
-                ),
-              ),
-            ),
-          ],
-        ),
+        appBar: _buildReportsHubAppBar(),
         body: _buildCategoryHub(),
       );
     }

@@ -62,4 +62,37 @@ class AuthValidation {
     }
     return null;
   }
+
+  static String? validateFirstName(String? value) {
+    final name = value?.trim() ?? '';
+    if (name.isEmpty) {
+      return 'First name is required';
+    }
+    if (name.length < 2) {
+      return 'Enter your first name';
+    }
+    return null;
+  }
+
+  /// Normalizes Pakistani mobile input to `03XXXXXXXXX` for HMIS APIs.
+  static String normalizePakistanPhone(String raw) {
+    var digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('92') && digits.length >= 12) {
+      digits = '0${digits.substring(2)}';
+    } else if (!digits.startsWith('0') && digits.length == 10) {
+      digits = '0$digits';
+    }
+    return digits;
+  }
+
+  static String formatPakistanPhoneDisplay(String normalizedPhone) {
+    final digits = normalizedPhone.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('0') && digits.length == 11) {
+      return '+92${digits.substring(1)}';
+    }
+    if (digits.startsWith('92') && digits.length == 12) {
+      return '+$digits';
+    }
+    return normalizedPhone;
+  }
 }

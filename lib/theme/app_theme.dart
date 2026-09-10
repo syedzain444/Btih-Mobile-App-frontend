@@ -157,7 +157,7 @@ class AppTheme {
         color: AppColors.primaryRed,
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: AppColors.white,
+        backgroundColor: AppColors.blush,
         selectedItemColor: AppColors.primaryRed,
         unselectedItemColor: AppColors.greyText,
         selectedLabelStyle: AppTypography.raleway(

@@ -13,9 +13,14 @@ class PushNotificationService {
 
   static final PushNotificationService instance = PushNotificationService._();
 
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  FirebaseMessaging? _messaging;
   String? _cachedToken;
   bool _handlersConfigured = false;
+
+  FirebaseMessaging? get _messagingOrNull {
+    if (kIsWeb) return null;
+    return _messaging ??= FirebaseMessaging.instance;
+  }
 
   static String get platform {
     if (kIsWeb) return 'web';
@@ -31,10 +36,12 @@ class PushNotificationService {
 
   Future<void> init() async {
     if (kIsWeb) return;
+    final messaging = _messagingOrNull;
+    if (messaging == null) return;
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    final settings = await _messaging.requestPermission(
+    final settings = await messaging.requestPermission(
       alert: true,
       badge: true,
       sound: true,
@@ -50,12 +57,12 @@ class PushNotificationService {
       _handlersConfigured = true;
     }
 
-    final initialMessage = await _messaging.getInitialMessage();
+    final initialMessage = await messaging.getInitialMessage();
     if (initialMessage != null) {
       await _handleIncomingMessage(initialMessage, openedFromTray: true);
     }
 
-    _messaging.onTokenRefresh.listen((token) async {
+    messaging.onTokenRefresh.listen((token) async {
       _cachedToken = token;
       debugPrint('FCM token refreshed');
       await registerForCurrentUser();
@@ -65,8 +72,10 @@ class PushNotificationService {
   /// Returns the Firebase Cloud Messaging device token for API registration.
   Future<String?> getDeviceToken() async {
     if (kIsWeb) return null;
+    final messaging = _messagingOrNull;
+    if (messaging == null) return null;
     try {
-      _cachedToken ??= await _messaging.getToken();
+      _cachedToken ??= await messaging.getToken();
       return _cachedToken;
     } catch (e) {
       debugPrint('FCM getToken failed: $e');

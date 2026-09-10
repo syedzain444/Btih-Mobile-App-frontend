@@ -65,6 +65,38 @@ class DatabaseHelper {
     return List.generate(maps.length, (i) => LocalAppointment.fromMap(maps[i]));
   }
 
+  Future<int> updateAppointmentStatus({
+    required String appointmentId,
+    required String status,
+    String? purposeAppend,
+  }) async {
+    Database db = await database;
+    final rows = await db.query(
+      'appointments',
+      where: 'appointmentId = ?',
+      whereArgs: [appointmentId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return 0;
+
+    final existingPurpose = rows.first['purpose']?.toString() ?? '';
+    final updatedPurpose = purposeAppend == null || purposeAppend.isEmpty
+        ? existingPurpose
+        : existingPurpose.isEmpty
+            ? purposeAppend
+            : '$existingPurpose | $purposeAppend';
+
+    return db.update(
+      'appointments',
+      {
+        'status': status,
+        'purpose': updatedPurpose,
+      },
+      where: 'appointmentId = ?',
+      whereArgs: [appointmentId],
+    );
+  }
+
   // Delete appointment
   Future<int> deleteAppointment(int id) async {
     Database db = await database;

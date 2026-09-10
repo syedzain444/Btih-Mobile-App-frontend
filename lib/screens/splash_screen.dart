@@ -1,4 +1,4 @@
-import 'package:btih_andriod_app/screens/dashboard_screen.dart';
+import 'package:btih_andriod_app/screens/patient_main_shell.dart';
 import 'package:btih_andriod_app/screens/welcome_screen.dart';
 import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:flutter/material.dart';
@@ -97,7 +97,7 @@ class _SplashScreenState extends State<SplashScreen>
           transitionDuration: const Duration(milliseconds: 500),
           pageBuilder: (context, animation, secondaryAnimation) {
             if (restored != null) {
-              return DashboardScreen(
+              return PatientMainShell(
                 patientMrNo: AuthSession.mrNo!,
                 patientName: AuthSession.displayName,
                 isLoggedIn: true,
