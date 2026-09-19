@@ -3,6 +3,8 @@ class RefillRequest {
   final String mrNo;
   final int? medicationId;
   final String? medicationName;
+  final int? ppId;
+  final int? patientVisitId;
   final int? quantity;
   final String? notes;
   final String status;
@@ -15,6 +17,8 @@ class RefillRequest {
     required this.mrNo,
     this.medicationId,
     this.medicationName,
+    this.ppId,
+    this.patientVisitId,
     this.quantity,
     this.notes,
     required this.status,
@@ -30,6 +34,8 @@ class RefillRequest {
       medicationId: _nullableInt(json['medicationId'] ?? json['MEDICATION_ID']),
       medicationName:
           json['medicationName']?.toString() ?? json['MEDICATION_NAME']?.toString(),
+      ppId: _nullableInt(json['ppId'] ?? json['PP_ID']),
+      patientVisitId: _nullableInt(json['patientVisitId'] ?? json['PATIENT_VISIT_ID']),
       quantity: _nullableInt(json['quantity'] ?? json['QUANTITY']),
       notes: json['notes']?.toString() ?? json['NOTES']?.toString(),
       status: json['status']?.toString() ?? json['STATUS']?.toString() ?? 'PENDING',

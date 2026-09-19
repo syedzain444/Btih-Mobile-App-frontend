@@ -1,9 +1,6 @@
 import 'package:btih_andriod_app/models/current_medication_model.dart';
 import 'package:btih_andriod_app/models/medication_reminder_model.dart';
 import 'package:btih_andriod_app/models/refill_request_model.dart';
-import 'package:btih_andriod_app/screens/medication_detail_screen.dart';
-import 'package:btih_andriod_app/screens/medication_refill_detail_screen.dart';
-import 'package:btih_andriod_app/screens/medication_reminder_form_screen.dart';
 import 'package:btih_andriod_app/services/medication_reminder_service.dart';
 import 'package:btih_andriod_app/services/medication_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
@@ -11,6 +8,8 @@ import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
+import 'package:btih_andriod_app/widgets/medication/medication_sheets.dart';
+import 'package:btih_andriod_app/utils/medication_duplicate_guard.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:flutter/material.dart';
 
@@ -30,6 +29,7 @@ class MedicationRemindersScreen extends StatefulWidget {
 class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
   final _medicationService = MedicationService();
   final _reminderService = MedicationReminderService();
+  late final PageController _pageController;
 
   int _selectedTab = 0;
   bool _isLoading = true;
@@ -39,10 +39,24 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
   List<MedicationReminder> _reminders = [];
   List<RefillRequest> _refills = [];
 
+  static const _tabTitles = ['Medications', 'Reminders', 'Refills'];
+  static const _tabIcons = [
+    Icons.medication_outlined,
+    Icons.notifications_active_outlined,
+    Icons.replay_rounded,
+  ];
+
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _selectedTab);
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -60,9 +74,15 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
 
       if (!mounted) return;
       setState(() {
-        _medications = results[0] as List<CurrentMedication>;
-        _reminders = results[1] as List<MedicationReminder>;
-        _refills = results[2] as List<RefillRequest>;
+        _medications = MedicationDuplicateGuard.dedupeMedications(
+          results[0] as List<CurrentMedication>,
+        );
+        _reminders = MedicationDuplicateGuard.dedupeReminders(
+          results[1] as List<MedicationReminder>,
+        );
+        _refills = MedicationDuplicateGuard.dedupeRefills(
+          results[2] as List<RefillRequest>,
+        );
         _isLoading = false;
       });
     } catch (e) {
@@ -74,27 +94,188 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
     }
   }
 
-  Future<void> _openForm({
+  void _goToTab(int index) {
+    if (index == _selectedTab) return;
+    setState(() => _selectedTab = index);
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Future<void> _openReminderSheet({
     MedicationReminder? existing,
     CurrentMedication? medication,
   }) async {
-    final saved = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MedicationReminderFormScreen(
-          mrNo: widget.patientMrNo,
-          existing: existing,
-          initialMedicationName: medication?.medicineName,
-          initialMedicationId:
-              medication != null && medication.medicationId > 0
-                  ? medication.medicationId
-                  : null,
+    if (existing == null && medication == null) return;
+
+    if (medication != null &&
+        MedicationDuplicateGuard.hasReminderForMedication(
+          existing: _reminders,
+          medication: medication,
+        )) {
+      final linked = MedicationDuplicateGuard.findReminderForMedication(
+        existing: _reminders,
+        medication: medication,
+      );
+      if (linked != null) {
+        await _openReminderSheet(existing: linked);
+      }
+      return;
+    }
+
+    final saved = await MedicationSheets.showReminderForm(
+      context: context,
+      mrNo: widget.patientMrNo,
+      existingReminders: _reminders,
+      existing: existing,
+      medication: medication,
+    );
+    if (saved == true) await _loadData();
+  }
+
+  Future<void> _openAddReminderPicker() async {
+    if (_medications.isEmpty) {
+      CustomMessageDialog.showError(
+        context,
+        'No prescribed medications yet. Your doctor\'s active prescriptions will appear under the Meds tab.',
+      );
+      return;
+    }
+
+    final available = MedicationDuplicateGuard.medicationsWithoutReminders(
+      medications: _medications,
+      reminders: _reminders,
+    );
+
+    if (available.isEmpty) {
+      CustomMessageDialog.showError(
+        context,
+        'Reminders are already set for all your current medications. Edit or delete an existing reminder if needed.',
+      );
+      return;
+    }
+
+    final selected = await MedicationSheets.showMedicationPicker(
+      context: context,
+      medications: available,
+    );
+
+    if (selected != null && mounted) {
+      await _openReminderSheet(medication: selected);
+    }
+  }
+
+  Future<void> _confirmDeleteReminder(MedicationReminder reminder) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete reminder?'),
+        content: Text(
+          'Remove the reminder for ${reminder.medicationName}?',
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.primaryRed),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
 
-    if (saved == true) {
-      await _loadData();
+    if (confirmed != true || !mounted) return;
+    await _deleteReminder(reminder);
+  }
+
+  Future<void> _deleteReminder(MedicationReminder reminder) async {
+    try {
+      await _reminderService.deleteReminder(
+        reminderId: reminder.reminderId,
+        mrNo: widget.patientMrNo,
+      );
+      if (!mounted) return;
+      setState(() {
+        _reminders = _reminders
+            .where((item) => item.reminderId != reminder.reminderId)
+            .toList();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      CustomMessageDialog.showError(
+        context,
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
+
+  Future<void> _openPrescriptionSheet(CurrentMedication medication) async {
+    await MedicationSheets.showPrescriptionDetail(
+      context: context,
+      mrNo: widget.patientMrNo,
+      medication: medication,
+    );
+  }
+
+  Future<void> _openRefillSheet(CurrentMedication medication) async {
+    final activeRefill = MedicationDuplicateGuard.activeRefillForMedication(
+      _refills,
+      medication.medicationId,
+    );
+    if (activeRefill != null) {
+      CustomMessageDialog.showError(
+        context,
+        'A refill request for ${medication.medicineName} is already '
+        '${activeRefill.displayStatus.toLowerCase()}. You cannot submit it again '
+        'until the current request is completed.',
+      );
+      return;
+    }
+
+    final saved = await MedicationSheets.showRefillRequest(
+      context: context,
+      mrNo: widget.patientMrNo,
+      medication: medication,
+      existingRefills: _refills,
+    );
+    if (saved == true) await _refreshRefillsSilently();
+  }
+
+  Future<void> _refreshRefillsSilently() async {
+    try {
+      final refills =
+          await _medicationService.getRefillHistory(widget.patientMrNo);
+      if (!mounted) return;
+      setState(() {
+        _refills = MedicationDuplicateGuard.dedupeRefills(refills);
+      });
+    } catch (_) {
+      // Keep the current list visible if the refresh fails.
+    }
+  }
+
+  Future<void> _openRefillStatus(RefillRequest refill) async {
+    final updated = await MedicationSheets.showRefillStatus(
+      context: context,
+      mrNo: widget.patientMrNo,
+      refill: refill,
+    );
+
+    if (!mounted) return;
+
+    if (updated != null) {
+      setState(() {
+        _refills = _refills
+            .map(
+              (item) => item.refillId == updated.refillId ? updated : item,
+            )
+            .toList();
+      });
     }
   }
 
@@ -134,85 +315,70 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
     }
   }
 
-  Future<void> _openMedicationDetail(CurrentMedication medication) async {
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MedicationDetailScreen(
-          mrNo: widget.patientMrNo,
-          medicationId: medication.medicationId,
-          fallbackName: medication.medicineName,
-        ),
-      ),
-    );
-
-    if (changed == true) {
-      await _loadData();
-    }
-  }
-
-  Future<void> _openRefillDetail(RefillRequest refill) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MedicationRefillDetailScreen(
-          mrNo: widget.patientMrNo,
-          refillId: refill.refillId,
-          initialRefill: refill,
-        ),
-      ),
-    );
-    await _loadData();
-  }
-
   bool _hasReminderForMedication(CurrentMedication medication) {
-    return _reminders.any(
-      (reminder) =>
-          reminder.medicationId == medication.medicationId ||
-          reminder.medicationName.toLowerCase() ==
-              medication.medicineName.toLowerCase(),
+    return MedicationDuplicateGuard.hasReminderForMedication(
+      existing: _reminders,
+      medication: medication,
     );
+  }
+
+  RefillRequest? _latestRefillForMedication(CurrentMedication medication) {
+    RefillRequest? latest;
+    for (final refill in _refills) {
+      if (refill.medicationId == medication.medicationId) {
+        latest = refill;
+        break;
+      }
+    }
+    return latest;
+  }
+
+  IconData _medicationIcon(String name) {
+    final upper = name.toUpperCase();
+    if (upper.contains('INJ')) return Icons.vaccines_outlined;
+    if (upper.contains('TAB') || upper.contains('CAP')) {
+      return Icons.medication_outlined;
+    }
+    if (upper.contains('SYR') || upper.contains('SYP')) {
+      return Icons.local_drink_outlined;
+    }
+    return Icons.medication_liquid_outlined;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       appBar: AppAppBar(
-        title: Text(
-          'My Medications',
-          style: AppTypography.raleway(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: AppColors.white,
+        title: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          child: Text(
+            _tabTitles[_selectedTab],
+            key: ValueKey(_selectedTab),
+            style: AppTypography.raleway(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: AppColors.white,
+            ),
           ),
         ),
         centerTitle: true,
         actions: [
-          if (_selectedTab == 1)
-            TapFeedback(
-              onTap: () => _openForm(),
-              borderRadius: BorderRadius.circular(10),
-              child: const Padding(
-                padding: EdgeInsets.only(right: 12),
-                child: AppBarIconBadge(icon: Icons.add_rounded),
-              ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: AppBarIconBadge(
+              key: ValueKey('icon_$_selectedTab'),
+              icon: _tabIcons[_selectedTab],
             ),
+          ),
         ],
       ),
       floatingActionButton: _selectedTab == 1
-          ? FloatingActionButton.extended(
-              onPressed: () => _openForm(),
-              backgroundColor: AppColors.medsTeal,
+          ? FloatingActionButton(
+              onPressed: _openAddReminderPicker,
+              backgroundColor: AppColors.deepRed,
               foregroundColor: AppColors.white,
-              icon: const Icon(Icons.add_alarm_rounded),
-              label: Text(
-                'Add reminder',
-                style: AppTypography.raleway(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                ),
-              ),
+              child: const Icon(Icons.add_rounded, size: 26),
             )
           : null,
       body: _isLoading
@@ -226,77 +392,24 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                      child: _buildIntroBanner(),
-                    ),
-                    const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: _buildTabSwitcher(),
                     ),
                     const SizedBox(height: 16),
-                    Expanded(child: _buildTabContent()),
+                    Expanded(
+                      child: PageView(
+                        controller: _pageController,
+                        onPageChanged: (index) {
+                          setState(() => _selectedTab = index);
+                        },
+                        children: [
+                          _buildMedicationsTab(),
+                          _buildRemindersTab(),
+                          _buildRefillsTab(),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-    );
-  }
-
-  Widget _buildIntroBanner() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppColors.medsTeal.withValues(alpha: 0.08),
-            AppColors.medsTealBg.withValues(alpha: 0.55),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.fieldBorder),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.medsTeal,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.medication_outlined,
-              color: AppColors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Manage your medications',
-                  style: AppTypography.raleway(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.medsTeal,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'View prescriptions, set reminders, and request refills.',
-                  style: AppTypography.roboto(
-                    fontSize: 13,
-                    color: AppColors.greyText,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -312,19 +425,25 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
       child: Row(
         children: [
           _buildTabButton(
-            label: 'Meds (${_medications.length})',
+            icon: Icons.medication_outlined,
+            label: 'Meds',
+            count: _medications.length,
             selected: _selectedTab == 0,
-            onTap: () => setState(() => _selectedTab = 0),
+            onTap: () => _goToTab(0),
           ),
           _buildTabButton(
-            label: 'Reminders (${_reminders.length})',
+            icon: Icons.notifications_active_outlined,
+            label: 'Reminders',
+            count: _reminders.length,
             selected: _selectedTab == 1,
-            onTap: () => setState(() => _selectedTab = 1),
+            onTap: () => _goToTab(1),
           ),
           _buildTabButton(
-            label: 'Refills (${_refills.length})',
+            icon: Icons.replay_rounded,
+            label: 'Refills',
+            count: _refills.length,
             selected: _selectedTab == 2,
-            onTap: () => setState(() => _selectedTab = 2),
+            onTap: () => _goToTab(2),
           ),
         ],
       ),
@@ -332,7 +451,9 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
   }
 
   Widget _buildTabButton({
+    required IconData icon,
     required String label,
+    required int count,
     required bool selected,
     required VoidCallback onTap,
   }) {
@@ -340,21 +461,36 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
       child: GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
-            color: selected ? AppColors.medsTeal : Colors.transparent,
+            color: selected ? AppColors.deepRed : Colors.transparent,
             borderRadius: BorderRadius.circular(18),
           ),
           child: Center(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.raleway(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: selected ? AppColors.white : AppColors.greyText,
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: selected ? AppColors.white : AppColors.greyText,
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    '$label ($count)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.raleway(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? AppColors.white : AppColors.greyText,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -362,22 +498,109 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
     );
   }
 
-  Widget _buildTabContent() {
-    switch (_selectedTab) {
-      case 0:
-        return _buildMedicationsList();
-      case 1:
-        return _buildRemindersList();
-      case 2:
-        return _buildRefillsList();
-      default:
-        return _buildMedicationsList();
-    }
+  /// Matches AppointmentsInfoScreen section header (icon + title row).
+  Widget _sectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 24, color: AppColors.deepRed),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: AppTypography.raleway(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: AppColors.deepRed,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
-  Widget _buildMedicationsList() {
+  /// Flat list with hairline dividers — matches dashboard Recent Activity.
+  Widget _buildHairlineList(List<Widget> items) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: List.generate(items.length, (index) {
+        final isLast = index == items.length - 1;
+        return Column(
+          children: [
+            items[index],
+            if (!isLast)
+              const Divider(
+                height: 1,
+                thickness: 1,
+                color: AppColors.hairline,
+              ),
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _activityIconCircle(
+    IconData icon, {
+    Color iconColor = AppColors.primaryRed,
+    Color background = AppColors.softRed,
+  }) {
+    return SizedBox(
+      width: 44,
+      child: Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: background,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, size: 20, color: iconColor),
+      ),
+    );
+  }
+
+  Widget _sleekAction({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color color = AppColors.deepRed,
+  }) {
+    return TapFeedback(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: color.withValues(alpha: 0.35)),
+              ),
+              child: Icon(icon, size: 18, color: color),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: AppTypography.raleway(
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: AppColors.greyText,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMedicationsTab() {
     if (_medications.isEmpty) {
-      return _emptyState(
+      return _emptyScroll(
         icon: Icons.medication_liquid_outlined,
         title: 'No current medications',
         subtitle: 'Your active prescriptions will appear here.',
@@ -387,50 +610,40 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
     return RefreshIndicator(
       color: AppColors.primaryRed,
       onRefresh: _loadData,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-        itemCount: _medications.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final medication = _medications[index];
-          final hasReminder = _hasReminderForMedication(medication);
-          return _medicationCard(medication, hasReminder);
-        },
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        children: [
+          _sectionHeader(
+            'Your Medications (${_medications.length})',
+            Icons.medication_outlined,
+          ),
+          const SizedBox(height: 12),
+          _buildHairlineList(
+            _medications.map(_medicationRow).toList(),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _medicationCard(CurrentMedication medication, bool hasReminder) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.fieldBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TapFeedback(
-            onTap: () => _openMedicationDetail(medication),
-            borderRadius: BorderRadius.circular(12),
+  Widget _medicationRow(CurrentMedication medication) {
+    final hasReminder = _hasReminderForMedication(medication);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TapFeedback(
+          onTap: () => _openPrescriptionSheet(medication),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: AppColors.medsTealBg,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.medication_outlined,
-                    color: AppColors.medsTeal,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 12),
+                _activityIconCircle(_medicationIcon(medication.medicineName)),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -438,23 +651,161 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
                       Text(
                         medication.medicineName,
                         style: AppTypography.raleway(
-                          fontSize: 16,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
                           color: AppColors.deepRed,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
                         medication.subtitle,
                         style: AppTypography.roboto(
-                          fontSize: 13,
+                          fontSize: 12,
                           color: AppColors.greyText,
                           height: 1.35,
                         ),
                       ),
                       if (medication.doctor != null &&
                           medication.doctor!.trim().isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Dr. ${medication.doctor}',
+                          style: AppTypography.roboto(
+                            fontSize: 11,
+                            color: AppColors.greyText,
+                          ),
+                        ),
+                      ],
+                      if (hasReminder) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Reminder active',
+                          style: AppTypography.raleway(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.medsTeal,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: AppColors.greyText.withValues(alpha: 0.7),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 44, bottom: 8),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: _sleekAction(
+              icon: hasReminder
+                  ? Icons.edit_outlined
+                  : Icons.notifications_none_outlined,
+              label: hasReminder ? 'Edit' : 'Remind',
+              color: AppColors.medsTeal,
+              onTap: () {
+                if (hasReminder) {
+                  final linked =
+                      MedicationDuplicateGuard.findReminderForMedication(
+                    existing: _reminders,
+                    medication: medication,
+                  );
+                  if (linked != null) {
+                    _openReminderSheet(existing: linked);
+                  }
+                } else {
+                  _openReminderSheet(medication: medication);
+                }
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRefillsTab() {
+    if (_medications.isEmpty) {
+      return _emptyScroll(
+        icon: Icons.replay_outlined,
+        title: 'No medications to refill',
+        subtitle: 'Active prescriptions will appear here for refill requests.',
+      );
+    }
+
+    return RefreshIndicator(
+      color: AppColors.primaryRed,
+      onRefresh: _loadData,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        children: [
+          _sectionHeader(
+            'Your Refills (${_medications.length})',
+            Icons.replay_rounded,
+          ),
+          const SizedBox(height: 12),
+          _buildHairlineList(
+            _medications.map(_refillMedicationRow).toList(),
+          ),
+          if (_refills.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            _sectionHeader(
+              'Recent requests (${_refills.length})',
+              Icons.history_rounded,
+            ),
+            const SizedBox(height: 12),
+            _buildHairlineList(
+              _refills.map(_refillHistoryRow).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _refillMedicationRow(CurrentMedication medication) {
+    final latestRefill = _latestRefillForMedication(medication);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TapFeedback(
+          onTap: () => _openPrescriptionSheet(medication),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _activityIconCircle(
+                  _medicationIcon(medication.medicineName),
+                  background: AppColors.medsTealBg,
+                  iconColor: AppColors.medsTeal,
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        medication.medicineName,
+                        style: AppTypography.raleway(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.deepRed,
+                        ),
+                      ),
+                      if (medication.doctor != null &&
+                          medication.doctor!.trim().isNotEmpty) ...[
+                        const SizedBox(height: 3),
                         Text(
                           'Dr. ${medication.doctor}',
                           style: AppTypography.roboto(
@@ -463,274 +814,232 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
                           ),
                         ),
                       ],
+                      if (latestRefill != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Last request: ${latestRefill.displayStatus} · ${latestRefill.formattedCreatedDate}',
+                          style: AppTypography.roboto(
+                            fontSize: 11,
+                            color: AppColors.greyText,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                const Icon(
+                Icon(
                   Icons.chevron_right_rounded,
-                  color: AppColors.greyText,
-                  size: 22,
+                  size: 18,
+                  color: AppColors.greyText.withValues(alpha: 0.7),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              if (hasReminder)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.medsTealBg,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.notifications_active_outlined,
-                        size: 14,
-                        color: AppColors.medsTeal,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Reminder set',
-                        style: AppTypography.raleway(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.medsTeal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              const Spacer(),
-              TapFeedback(
-                onTap: () => _openForm(medication: medication),
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: hasReminder
-                        ? AppColors.fieldFill
-                        : AppColors.medsTeal,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: hasReminder
-                          ? AppColors.fieldBorder
-                          : AppColors.medsTeal,
-                    ),
-                  ),
-                  child: Text(
-                    hasReminder ? 'Add another' : 'Set reminder',
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 44, bottom: 8),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: _sleekAction(
+              icon: Icons.replay_rounded,
+              label: 'Refill',
+              color: AppColors.medsTeal,
+              onTap: () => _openRefillSheet(medication),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _refillHistoryRow(RefillRequest refill) {
+    return TapFeedback(
+      onTap: () => _openRefillStatus(refill),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _activityIconCircle(Icons.receipt_long_outlined),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    refill.medicationName ?? 'Refill request',
                     style: AppTypography.raleway(
-                      fontSize: 12,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: hasReminder
-                          ? AppColors.deepRed
-                          : AppColors.white,
+                      color: AppColors.deepRed,
                     ),
                   ),
-                ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${refill.displayStatus} · ${refill.formattedCreatedDate}',
+                    style: AppTypography.roboto(
+                      fontSize: 12,
+                      color: AppColors.greyText,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: AppColors.greyText.withValues(alpha: 0.7),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRemindersTab() {
+    if (_reminders.isEmpty) {
+      return _emptyScroll(
+        icon: Icons.alarm_add_outlined,
+        title: 'No reminders yet',
+        subtitle:
+            'Tap + to choose a prescribed medication and set a reminder.',
+        actionLabel: 'Add reminder',
+        onAction: _openAddReminderPicker,
+      );
+    }
+
+    return RefreshIndicator(
+      color: AppColors.primaryRed,
+      onRefresh: _loadData,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 88),
+        children: [
+          _sectionHeader(
+            'Your Reminders (${_reminders.length})',
+            Icons.notifications_active_outlined,
+          ),
+          const SizedBox(height: 12),
+          _buildHairlineList(
+            _reminders.map(_reminderRow).toList(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildRefillsList() {
-    if (_refills.isEmpty) {
-      return _emptyState(
-        icon: Icons.replay_outlined,
-        title: 'No refill requests',
-        subtitle:
-            'Open a medication and tap “Request refill” to submit a request.',
-      );
-    }
-
-    return RefreshIndicator(
-      color: AppColors.primaryRed,
-      onRefresh: _loadData,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-        itemCount: _refills.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 12),
-        itemBuilder: (context, index) => _refillCard(_refills[index]),
-      ),
-    );
-  }
-
-  Widget _refillCard(RefillRequest refill) {
-    Color statusColor;
-    Color statusBg;
-    switch (refill.status.toUpperCase()) {
-      case 'APPROVED':
-      case 'COMPLETED':
-        statusColor = AppColors.medsTeal;
-        statusBg = AppColors.medsTealBg;
-      case 'REJECTED':
-      case 'DECLINED':
-        statusColor = AppColors.primaryRed;
-        statusBg = AppColors.softRed;
-      default:
-        statusColor = AppColors.rustRed;
-        statusBg = AppColors.lightMaroon;
-    }
-
-    return TapFeedback(
-      onTap: () => _openRefillDetail(refill),
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.fieldBorder),
+  Widget _reminderRow(MedicationReminder reminder) {
+    return Dismissible(
+      key: ValueKey('reminder_${reminder.reminderId}'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) async {
+        await _confirmDeleteReminder(reminder);
+        return false;
+      },
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 16),
+        color: AppColors.primaryRed.withValues(alpha: 0.12),
+        child: const Icon(
+          Icons.delete_outline_rounded,
+          color: AppColors.primaryRed,
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: statusBg,
-                borderRadius: BorderRadius.circular(14),
+      ),
+      child: TapFeedback(
+        onTap: () => _openReminderSheet(existing: reminder),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _activityIconCircle(
+                Icons.notifications_active_outlined,
+                iconColor: reminder.isEnabled
+                    ? AppColors.primaryRed
+                    : AppColors.greyText,
+                background: reminder.isEnabled
+                    ? AppColors.softRed
+                    : AppColors.fieldFill,
               ),
-              child: Icon(Icons.replay_rounded, color: statusColor),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    refill.medicationName ?? 'Medication refill',
-                    style: AppTypography.raleway(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.deepRed,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${refill.displayStatus} · ${refill.formattedDate}',
-                    style: AppTypography.roboto(
-                      fontSize: 12,
-                      color: AppColors.greyText,
-                    ),
-                  ),
-                  if (refill.quantity != null) ...[
-                    const SizedBox(height: 2),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      'Qty: ${refill.quantity}',
+                      reminder.medicationName,
+                      style: AppTypography.raleway(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.deepRed,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${reminder.formattedTime} · ${MedicationReminder.formatDaysLabel(reminder.daysOfWeek)}',
                       style: AppTypography.roboto(
                         fontSize: 12,
                         color: AppColors.greyText,
                       ),
                     ),
+                    if (reminder.createdAt != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Added ${reminder.formattedCreatedDate}',
+                        style: AppTypography.roboto(
+                          fontSize: 11,
+                          color: AppColors.greyText,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.greyText),
-          ],
+              IconButton(
+                tooltip: 'Delete reminder',
+                onPressed: () => _confirmDeleteReminder(reminder),
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  size: 22,
+                  color: AppColors.primaryRed,
+                ),
+              ),
+              Switch.adaptive(
+                value: reminder.isEnabled,
+                activeTrackColor: AppColors.deepRed.withValues(alpha: 0.4),
+                activeThumbColor: AppColors.deepRed,
+                onChanged: (value) => _toggleReminder(reminder, value),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildRemindersList() {
-    if (_reminders.isEmpty) {
-      return _emptyState(
-        icon: Icons.alarm_add_outlined,
-        title: 'No reminders yet',
-        subtitle: 'Tap “Add reminder” to schedule your medication times.',
-        actionLabel: 'Add reminder',
-        onAction: () => _openForm(),
-      );
-    }
-
-    return RefreshIndicator(
-      color: AppColors.primaryRed,
-      onRefresh: _loadData,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-        itemCount: _reminders.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final reminder = _reminders[index];
-          return _reminderCard(reminder);
-        },
+  Widget _emptyScroll({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
       ),
-    );
-  }
-
-  Widget _reminderCard(MedicationReminder reminder) {
-    return TapFeedback(
-      onTap: () => _openForm(existing: reminder),
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.fieldBorder),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      children: [
+        _emptyState(
+          icon: icon,
+          title: title,
+          subtitle: subtitle,
+          actionLabel: actionLabel,
+          onAction: onAction,
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: reminder.isEnabled
-                    ? AppColors.medsTealBg
-                    : AppColors.fieldFill,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(
-                Icons.alarm_rounded,
-                color: reminder.isEnabled
-                    ? AppColors.medsTeal
-                    : AppColors.greyText,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    reminder.medicationName,
-                    style: AppTypography.raleway(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.deepRed,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${reminder.formattedTime} · ${MedicationReminder.formatDaysLabel(reminder.daysOfWeek)}',
-                    style: AppTypography.roboto(
-                      fontSize: 12,
-                      color: AppColors.greyText,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Switch.adaptive(
-              value: reminder.isEnabled,
-              activeTrackColor: AppColors.medsTeal.withValues(alpha: 0.45),
-              activeThumbColor: AppColors.medsTeal,
-              onChanged: (value) => _toggleReminder(reminder, value),
-            ),
-          ],
-        ),
-      ),
+      ],
     );
   }
 
@@ -741,65 +1050,54 @@ class _MedicationRemindersScreenState extends State<MedicationRemindersScreen> {
     String? actionLabel,
     VoidCallback? onAction,
   }) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.medsTealBg,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 34, color: AppColors.medsTeal),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      child: Column(
+        children: [
+          Icon(icon, size: 48, color: AppColors.greyText.withValues(alpha: 0.35)),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: AppTypography.raleway(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.deepRed,
             ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: AppTypography.raleway(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.deepRed,
-              ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: AppTypography.roboto(
+              fontSize: 14,
+              color: AppColors.greyText,
+              height: 1.4,
             ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: AppTypography.roboto(
-                fontSize: 14,
-                color: AppColors.greyText,
-                height: 1.4,
-              ),
-            ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 18),
-              TapFeedback(
-                onTap: onAction,
-                borderRadius: BorderRadius.circular(24),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.medsTeal,
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Text(
-                    actionLabel,
-                    style: AppTypography.raleway(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.white,
-                    ),
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 18),
+            TapFeedback(
+              onTap: onAction,
+              borderRadius: BorderRadius.circular(24),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.deepRed,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Text(
+                  actionLabel,
+                  style: AppTypography.raleway(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.white,
                   ),
                 ),
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }

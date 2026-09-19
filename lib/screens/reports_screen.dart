@@ -1097,6 +1097,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:btih_andriod_app/theme/app_colors.dart';
+import 'package:btih_andriod_app/services/recent_activity_service.dart';
 import 'package:btih_andriod_app/utils/download_location_helper.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
 import 'package:btih_andriod_app/utils/report_download_helper.dart';
@@ -1172,14 +1173,14 @@ class ReportsScreen extends StatefulWidget {
   final String patientMrNo;
   final String patientName;
   final int initialTabIndex;
-  final bool openCategoryDirectly;
+  final Map<String, dynamic>? autoOpenReport;
 
   const ReportsScreen({
     super.key,
     required this.patientMrNo,
     required this.patientName,
     this.initialTabIndex = 0,
-    this.openCategoryDirectly = false,
+    this.autoOpenReport,
   });
 
   @override
@@ -1209,10 +1210,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
   final List<ReportSortOrder> _sortOrders =
       List.filled(4, ReportSortOrder.newestFirst);
 
+  /// Prescription care-setting filter: null = All, else OPD | IPD | Emergency.
+  String? _prescriptionCareSetting;
+
   bool isLoading = true;
   String? errorMessage;
-  int? _selectedCategoryIndex;
+  late int _selectedCategoryIndex;
   bool _reportDownloadInProgress = false;
+  bool _didAutoOpenReport = false;
 
   // Color scheme
   final Color primaryColor = const Color(0xFF1FC9C0);
@@ -1220,7 +1225,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
   final Color backgroundColor = Colors.white;
   final Color cardBackgroundColor = Colors.white;
 
-  // Report categories shown as cards on the hub screen
   final List<Map<String, dynamic>> categories = [
     {
       'name': 'Laboratory',
@@ -1255,10 +1259,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   void initState() {
     super.initState();
-    final initialIndex = widget.initialTabIndex.clamp(0, 3);
-    _selectedCategoryIndex = widget.openCategoryDirectly || initialIndex != 0
-        ? initialIndex
-        : null;
+    _selectedCategoryIndex = widget.initialTabIndex.clamp(0, 3);
     labSearchController.addListener(_onSearchChanged);
     gastroSearchController.addListener(_onSearchChanged);
     radiologySearchController.addListener(_onSearchChanged);
@@ -1297,7 +1298,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     0: 'Search tests...',
     1: 'Search gastro reports...',
     2: 'Search imaging reports...',
-    3: 'Search prescriptions...',
+    3: 'Search by doctor, date, OPD, IPD...',
   };
 
   static const _emptyMessages = {
@@ -1322,11 +1323,73 @@ class _ReportsScreenState extends State<ReportsScreen> {
         report['modalityName'] ?? report['modalitY_NM'] ?? report['modality'];
     final modalityText = modality?.toString().trim();
     if (modalityText != null && modalityText.isNotEmpty) return modalityText;
+    final careSetting = report['careSetting']?.toString().trim();
+    if (careSetting != null && careSetting.isNotEmpty) return careSetting;
     final department = report['department']?.toString().trim();
     if (department != null && department.isNotEmpty) return department;
     final type = report['type']?.toString().trim();
     if (type != null && type.isNotEmpty) return type;
     return null;
+  }
+
+  /// Normalize API department into OPD | IPD | Emergency (or Other).
+  String _normalizePrescriptionCareSetting(String? rawDepartment) {
+    final raw = (rawDepartment ?? '').trim().toUpperCase();
+    if (raw.isEmpty) return 'Other';
+    if (raw.contains('EMERGENCY') ||
+        raw == 'ER' ||
+        raw.contains('A&E') ||
+        raw.startsWith('ED ') ||
+        raw == 'ED') {
+      return 'Emergency';
+    }
+    if (raw.contains('IPD') ||
+        raw.contains('INPATIENT') ||
+        raw.contains('IN-PATIENT') ||
+        raw.contains('IN PATIENT')) {
+      return 'IPD';
+    }
+    if (raw.contains('OPD') ||
+        raw.contains('OUTPATIENT') ||
+        raw.contains('OUT-PATIENT') ||
+        raw.contains('OUT PATIENT')) {
+      return 'OPD';
+    }
+    return 'Other';
+  }
+
+  String _prescriptionCareSettingOf(Map<String, dynamic> report) {
+    final stored = report['careSetting']?.toString().trim();
+    if (stored != null && stored.isNotEmpty) return stored;
+    return _normalizePrescriptionCareSetting(
+      report['department']?.toString(),
+    );
+  }
+
+  Map<String, int> _prescriptionCareSettingCounts() {
+    final counts = <String, int>{
+      'OPD': 0,
+      'IPD': 0,
+      'Emergency': 0,
+      'Other': 0,
+    };
+    for (final report in prescriptionReports) {
+      final key = _prescriptionCareSettingOf(report);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  String _prescriptionDisplayTitle({
+    required String doctor,
+    required String careSetting,
+    required dynamic visitId,
+  }) {
+    if (doctor.isNotEmpty) return doctor;
+    if (careSetting.isNotEmpty && careSetting != 'Other') return careSetting;
+    final id = visitId?.toString().trim();
+    if (id != null && id.isNotEmpty) return 'Visit $id';
+    return 'Untitled visit';
   }
 
   List<String> _availableTestCategories(int index) {
@@ -1370,6 +1433,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           '',
       report['doctor'] ?? '',
       report['department'] ?? '',
+      report['careSetting'] ?? '',
       _reportTestCategory(report) ?? '',
     ].join(' ').toLowerCase();
     return haystack.contains(q);
@@ -1415,9 +1479,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final filters = _categoryFilters[index];
     final sortOrder = _sortOrders[index];
 
-    final list = raw
-        .where((r) => _matchesSearch(r, query, index) && _matchesFilters(r, filters))
-        .toList();
+    final list = raw.where((r) {
+      if (!_matchesSearch(r, query, index) || !_matchesFilters(r, filters)) {
+        return false;
+      }
+      if (index == 3 && _prescriptionCareSetting != null) {
+        return _prescriptionCareSettingOf(r) == _prescriptionCareSetting;
+      }
+      return true;
+    }).toList();
 
     list.sort((a, b) {
       final da = _parseReportDate(a);
@@ -1497,12 +1567,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
       setState(() {
         isLoading = false;
       });
+      _maybeAutoOpenReport();
     } catch (e) {
       setState(() {
         errorMessage = 'Error fetching reports: $e';
         isLoading = false;
       });
     }
+  }
+
+  void _maybeAutoOpenReport() {
+    final report = widget.autoOpenReport;
+    if (_didAutoOpenReport || report == null || !mounted) return;
+    _didAutoOpenReport = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _openReport(Map<String, dynamic>.from(report));
+    });
   }
 
   Map<String, dynamic> _mapDiagnosticReport(
@@ -1547,6 +1628,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       'modalitY_NM': modalityName,
       'icon': icon,
       'type': type,
+      'testType': type,
+      'testtype': type,
     };
   }
 
@@ -1574,6 +1657,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
         '';
   }
 
+  bool _isEmptyReportsResponse(int statusCode) =>
+      statusCode == 200 || statusCode == 204 || statusCode == 404;
+
   Future<void> fetchLaboratoryReports() async {
     try {
       final response = await ApiConfig.client.get(
@@ -1581,8 +1667,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
             "${ApiConfig.baseUrl}/api/Patient/${widget.patientMrNo}/labReports"),
       );
 
-      if (response.statusCode == 200) {
-        final data = _decodeReportList(json.decode(response.body));
+      if (_isEmptyReportsResponse(response.statusCode)) {
+        final data = response.statusCode == 200
+            ? _decodeReportList(json.decode(response.body))
+            : <dynamic>[];
         setState(() {
           laboratoryReports = data.map((item) {
             final raw = Map<String, dynamic>.from(item as Map);
@@ -1605,8 +1693,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
         Uri.parse("${ApiConfig.baseUrl}/api/Patient/${widget.patientMrNo}/gastroReports"),
       );
 
-      if (response.statusCode == 200) {
-        final data = _decodeReportList(json.decode(response.body));
+      if (_isEmptyReportsResponse(response.statusCode)) {
+        final data = response.statusCode == 200
+            ? _decodeReportList(json.decode(response.body))
+            : <dynamic>[];
         setState(() {
           gastroReports = data.map((item) {
             final raw = Map<String, dynamic>.from(item as Map);
@@ -1630,8 +1720,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
             "${ApiConfig.baseUrl}/api/Patient/${widget.patientMrNo}/radiologyReports"),
       );
 
-      if (response.statusCode == 200) {
-        final data = _decodeReportList(json.decode(response.body));
+      if (_isEmptyReportsResponse(response.statusCode)) {
+        final data = response.statusCode == 200
+            ? _decodeReportList(json.decode(response.body))
+            : <dynamic>[];
         setState(() {
           radiologyReports = data.map((item) {
             final raw = Map<String, dynamic>.from(item as Map);
@@ -1655,24 +1747,47 @@ class _ReportsScreenState extends State<ReportsScreen> {
             "${ApiConfig.baseUrl}/api/Patient/${widget.patientMrNo}/prescriptionReports"),
       );
 
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
+      if (_isEmptyReportsResponse(response.statusCode)) {
+        final data = response.statusCode == 200
+            ? _decodeReportList(json.decode(response.body))
+            : <dynamic>[];
         setState(() {
           prescriptionReports = data.map((item) {
             final raw = Map<String, dynamic>.from(item as Map);
-            final visitDate = raw['visiT_DATE']?.toString() ?? '';
-            final doctor = raw['doctor']?.toString().trim() ?? '';
-            final department = raw['department']?.toString().trim() ?? '';
+            final visitDate = _readString(raw, [
+                  'visitDate',
+                  'visiT_DATE',
+                  'VISIT_DATE',
+                  'visit_date',
+                ]) ??
+                '';
+            final doctor = _readString(raw, ['doctor', 'DOCTOR']) ?? '';
+            final department =
+                _readString(raw, ['department', 'DEPARTMENT']) ?? '';
+            final careSetting = _normalizePrescriptionCareSetting(department);
+            final visitId = raw['patVisitId'] ??
+                raw['paT_VISIT_ID'] ??
+                raw['pat_visit_id'] ??
+                raw['PAT_VISIT_ID'];
+            final title = _prescriptionDisplayTitle(
+              doctor: doctor,
+              careSetting: careSetting,
+              visitId: visitId,
+            );
             return {
               ...raw,
-              'name': 'Prescription',
+              'name': title,
+              'diagnosticName': title,
               'date': visitDate,
               'visiT_DATE': visitDate,
+              'visitDate': visitDate,
               'visit_date': visitDate,
               'doctor': doctor,
               'department': department,
-              'pat_visit_id': raw['paT_VISIT_ID'],
-              'paT_VISIT_ID': raw['paT_VISIT_ID'],
+              'careSetting': careSetting,
+              'pat_visit_id': visitId,
+              'paT_VISIT_ID': visitId,
+              'patVisitId': visitId,
               'icon': Icons.description_outlined,
               'type': 'Prescription',
             };
@@ -1829,8 +1944,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     try {
       final dio = ApiConfig.createDio();
-      dio.options.connectTimeout = const Duration(seconds: 30);
-      dio.options.receiveTimeout = const Duration(seconds: 30);
+      dio.options.connectTimeout = const Duration(seconds: 60);
+      dio.options.receiveTimeout = const Duration(seconds: 60);
 
       final response = await dio.get(
         url,
@@ -1927,7 +2042,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => Scaffold(
-          backgroundColor: AppColors.scaffoldBg,
+          backgroundColor: AppColors.white,
           appBar: AppAppBar(
             title: Text(
               fileName,
@@ -1945,12 +2060,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
             ],
           ),
-          body: SfPdfViewer.file(
-            File(filePath),
-            pageLayoutMode: PdfPageLayoutMode.single,
-            canShowScrollHead: true,
-            canShowScrollStatus: true,
-            enableDoubleTapZooming: true,
+          body: ColoredBox(
+            color: AppColors.white,
+            child: SfPdfViewer.file(
+              File(filePath),
+              pageLayoutMode: PdfPageLayoutMode.single,
+              canShowScrollHead: true,
+              canShowScrollStatus: true,
+              enableDoubleTapZooming: true,
+            ),
           ),
         ),
       ),
@@ -1984,6 +2102,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final request = _resolveReportPdfRequest(report);
     if (request == null) return;
 
+    final categoryLabel =
+        (categories[_selectedCategoryIndex]['name'] as String?) ?? 'Report';
+    RecentActivityService.instance.trackMedicalReport(
+      scopeId: RecentActivityService.instance.resolveScope(
+        patientMrNo: widget.patientMrNo,
+      ),
+      categoryIndex: _selectedCategoryIndex,
+      categoryLabel: categoryLabel,
+      report: report,
+    );
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1998,8 +2127,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final filePath = '${dir.path}/${request.fileName}';
 
       final dio = ApiConfig.createDio();
-      dio.options.connectTimeout = const Duration(seconds: 30);
-      dio.options.receiveTimeout = const Duration(seconds: 30);
+      dio.options.connectTimeout = const Duration(seconds: 60);
+      dio.options.receiveTimeout = const Duration(seconds: 60);
 
       final response = await dio.get(
         request.url,
@@ -2007,8 +2136,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
       );
 
       final contentType = response.headers.value("content-type");
-
-      if (contentType == null || !contentType.contains("application/pdf")) {
+      final bytes = response.data;
+      if (!_looksLikePdf(bytes) &&
+          (contentType == null || !contentType.contains("application/pdf"))) {
         if (mounted && Navigator.canPop(context)) {
           Navigator.pop(context);
         }
@@ -2016,7 +2146,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       }
 
       final file = File(filePath);
-      await file.writeAsBytes(response.data, flush: true);
+      await file.writeAsBytes(bytes, flush: true);
 
       if (!mounted) return;
       if (Navigator.canPop(context)) {
@@ -2065,37 +2195,75 @@ class _ReportsScreenState extends State<ReportsScreen> {
   _ReportPdfRequest? _resolveReportPdfRequest(Map<String, dynamic> report) {
     final patDiagId =
         report['patDiagId'] ?? report['paT_DIAG_ID'] ?? report['pat_diag_id'];
-    final patVisitId = report['paT_VISIT_ID'] ?? report['pat_visit_id'];
+    final patVisitId = report['patVisitId'] ??
+        report['paT_VISIT_ID'] ??
+        report['pat_visit_id'] ??
+        report['PAT_VISIT_ID'];
+    final mappedType =
+        (report['type'] ?? report['testType'] ?? report['testtype'] ?? '')
+            .toString()
+            .trim()
+            .toUpperCase();
+    final modality = (report['modalityName'] ??
+                report['modalitY_NM'] ??
+                report['modality'] ??
+                '')
+            .toString()
+            .toUpperCase();
 
     String reportName = '';
     String rptId = '';
     String parameters = '';
 
-    if (patVisitId != null) {
+    // Prefer the open screen category so Radiology/Gastro never fall through to Labrpt.
+    final categoryDefaults = <int, List<String>>{
+      0: ['Labrpt', '19'],
+      1: ['GastRpt', '64'],
+      2: ['RadRpt', '22'],
+      3: ['PRESCRIPTION_A4', '141'],
+    };
+
+    final isPrescription = _selectedCategoryIndex == 3 ||
+        mappedType == 'PRESCRIPTION' ||
+        (patVisitId != null && patDiagId == null);
+
+    if (isPrescription && patVisitId != null) {
       parameters = patVisitId.toString();
       reportName = 'PRESCRIPTION_A4';
       rptId = '141';
     } else if (patDiagId != null) {
       parameters = patDiagId.toString();
 
-      final testType = report['testtype']?.toString().toUpperCase() ?? '';
-      final modality = (report['modalitY_NM'] ?? report['modality'])
-              ?.toString()
-              .toUpperCase() ??
-          '';
-
-      if (testType == 'LABORATORY' || modality.contains('LAB')) {
-        reportName = 'Labrpt';
-        rptId = '19';
-      } else if (testType == 'GASTRO' || modality.contains('GASTRO')) {
-        reportName = 'GastRpt';
-        rptId = '64';
-      } else if (testType == 'RADIOLOGY' || modality.contains('RADIOLOGY')) {
+      if (_selectedCategoryIndex == 2 ||
+          mappedType == 'RADIOLOGY' ||
+          mappedType.contains('RAD') ||
+          modality.contains('RADIOLOGY') ||
+          modality.contains('XRAY') ||
+          modality.contains('X-RAY') ||
+          modality.contains('MRI') ||
+          modality.contains('CT') ||
+          modality.contains('ULTRASOUND') ||
+          modality.contains('U/S')) {
         reportName = 'RadRpt';
         rptId = '22';
+      } else if (_selectedCategoryIndex == 1 ||
+          mappedType == 'GASTRO' ||
+          mappedType.contains('GASTRO') ||
+          mappedType.contains('ENDOSCOPY') ||
+          modality.contains('GASTRO')) {
+        reportName = 'GastRpt';
+        rptId = '64';
+      } else if (_selectedCategoryIndex == 0 ||
+          mappedType == 'LABORATORY' ||
+          mappedType.contains('LAB') ||
+          modality.contains('LAB')) {
+        reportName = 'Labrpt';
+        rptId = '19';
       } else {
-        reportName = 'PRESCRIPTION_A4';
-        rptId = '141';
+        final defaults =
+            categoryDefaults[_selectedCategoryIndex] ?? ['Labrpt', '19'];
+        reportName = defaults[0];
+        rptId = defaults[1];
       }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2111,9 +2279,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final fileName = '${safeTitle}_$parameters.pdf';
     final url =
         "${ApiConfig.baseUrl}/api/PatientReport/GenerateReport"
-        "?rptId=$rptId"
-        "&reportName=$reportName"
-        "&parameters=$parameters"
+        "?rptId=${Uri.encodeQueryComponent(rptId)}"
+        "&reportName=${Uri.encodeQueryComponent(reportName)}"
+        "&parameters=${Uri.encodeQueryComponent(parameters)}"
         "&user=MobileApp";
 
     return _ReportPdfRequest(
@@ -2133,59 +2301,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return (report['type'] ?? 'Report').toString();
   }
 
-  int _reportCountForCategory(int index) {
-    switch (index) {
-      case 0:
-        return laboratoryReports.length;
-      case 1:
-        return gastroReports.length;
-      case 2:
-        return radiologyReports.length;
-      case 3:
-        return prescriptionReports.length;
-      default:
-        return 0;
-    }
-  }
-
   void _handleBack() {
-    if (_selectedCategoryIndex != null && !widget.openCategoryDirectly) {
-      setState(() => _selectedCategoryIndex = null);
-      return;
-    }
     Navigator.pop(context);
-  }
-
-  PreferredSizeWidget _buildReportsHubAppBar() {
-    return AppAppBar(
-      leading: AppAppBar.backButton(context, onPressed: _handleBack),
-      title: Text(
-        'Medical Reports',
-        style: AppTypography.raleway(
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-          color: AppColors.white,
-        ),
-      ),
-      actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: AppColors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.assignment_outlined,
-              color: AppColors.white,
-              size: 20,
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   PreferredSizeWidget _buildCategoryAppBar(int index) {
@@ -2297,6 +2414,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
             ),
           ),
+          if (index == 3) _buildPrescriptionCareSettingChips(),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
             child: Row(
@@ -2434,6 +2552,74 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  Widget _buildPrescriptionCareSettingChips() {
+    final counts = _prescriptionCareSettingCounts();
+    final total = prescriptionReports.length;
+    final options = <MapEntry<String?, String>>[
+      MapEntry(null, 'All'),
+      const MapEntry('OPD', 'OPD'),
+      const MapEntry('IPD', 'IPD'),
+      const MapEntry('Emergency', 'Emergency'),
+    ];
+    if ((counts['Other'] ?? 0) > 0) {
+      options.add(const MapEntry('Other', 'Other'));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (var i = 0; i < options.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              _prescriptionCareSettingChip(
+                label: options[i].value,
+                value: options[i].key,
+                count: options[i].key == null
+                    ? total
+                    : (counts[options[i].key] ?? 0),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _prescriptionCareSettingChip({
+    required String label,
+    required String? value,
+    required int count,
+  }) {
+    final selected = _prescriptionCareSetting == value;
+    return TapFeedback(
+      onTap: () => setState(() => _prescriptionCareSetting = value),
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primaryRed : AppColors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? AppColors.primaryRed
+                : AppColors.fieldBorder,
+          ),
+        ),
+        child: Text(
+          '$label ($count)',
+          style: AppTypography.roboto(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: selected ? AppColors.white : AppColors.darkText,
+          ),
+        ),
+      ),
+    );
+  }
+
   PopupMenuItem<ReportSortOrder> _sortMenuItem(
     ReportSortOrder value,
     String label,
@@ -2463,69 +2649,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  Widget _buildCategoryHub() {
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Report Categories',
-            style: AppTypography.montserrat(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              color: AppColors.darkText,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Choose a category to view your medical reports.',
-            style: AppTypography.roboto(
-              fontSize: 14,
-              color: AppColors.greyText,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 20),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              childAspectRatio: 0.88,
-            ),
-            itemCount: categories.length,
-            itemBuilder: (context, index) {
-              final category = categories[index];
-              return _CategoryCard(
-                title: category['name'] as String,
-                subtitle: category['subtitle'] as String,
-                icon: category['icon'] as IconData,
-                tint: category['color'] as Color,
-                bg: category['bg'] as Color,
-                count: _reportCountForCategory(index),
-                onTap: () => setState(() => _selectedCategoryIndex = index),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
-      final directIndex = widget.openCategoryDirectly
-          ? widget.initialTabIndex.clamp(0, 3)
-          : null;
-
       return Scaffold(
         backgroundColor: AppColors.scaffoldBg,
-        appBar: directIndex != null ? _buildCategoryAppBar(directIndex) : null,
+        appBar: _buildCategoryAppBar(_selectedCategoryIndex),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2549,15 +2678,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
 
     if (errorMessage != null) {
-      final directIndex = widget.openCategoryDirectly
-          ? widget.initialTabIndex.clamp(0, 3)
-          : null;
-
       return Scaffold(
         backgroundColor: AppColors.scaffoldBg,
-        appBar: directIndex != null
-            ? _buildCategoryAppBar(directIndex)
-            : _buildReportsHubAppBar(),
+        appBar: _buildCategoryAppBar(_selectedCategoryIndex),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2590,15 +2713,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       );
     }
 
-    if (_selectedCategoryIndex == null) {
-      return Scaffold(
-        backgroundColor: AppColors.scaffoldBg,
-        appBar: _buildReportsHubAppBar(),
-        body: _buildCategoryHub(),
-      );
-    }
-
-    return _buildCategoryDetailScreen(_selectedCategoryIndex!);
+    return _buildCategoryDetailScreen(_selectedCategoryIndex);
   }
 
   Widget _buildReportsList({
@@ -2784,113 +2899,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 }
 
-class _CategoryCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color tint;
-  final Color bg;
-  final int count;
-  final VoidCallback onTap;
-
-  const _CategoryCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.tint,
-    required this.bg,
-    required this.count,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.white,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Ink(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.fieldBorder),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.shadow.withValues(alpha: 0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: bg,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(icon, color: tint, size: 24),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: bg,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '$count',
-                      style: AppTypography.mono(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: tint,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              Text(
-                title,
-                style: AppTypography.raleway(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.darkText,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                subtitle,
-                style: AppTypography.roboto(
-                  fontSize: 11,
-                  color: AppColors.greyText,
-                  height: 1.3,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Icon(Icons.arrow_forward_rounded, size: 18, color: tint),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ReportRecordCard extends StatelessWidget {
   final Map<String, dynamic> report;
   final int categoryIndex;
@@ -2952,6 +2960,9 @@ class _ReportRecordCard extends StatelessWidget {
       report['modalityName'] ?? report['modalitY_NM'] ?? report['modality'],
     );
     final department = _displayValue(report['department']);
+    final careSetting = _displayValue(
+      report['careSetting'] ?? department,
+    );
     final doctor = _displayValue(report['doctor']);
     final diagId =
         report['patDiagId'] ?? report['paT_DIAG_ID'] ?? report['pat_diag_id'];
@@ -2966,9 +2977,18 @@ class _ReportRecordCard extends StatelessWidget {
     );
     final categoryLabel = isDiagnosticReport && modality.isNotEmpty
         ? modality
-        : isPrescription && department.isNotEmpty
-            ? department
+        : isPrescription && careSetting.isNotEmpty
+            ? careSetting
             : (report['type'] ?? categoryName).toString();
+
+    final titleText = isPrescription
+        ? (diagnosticName.isNotEmpty &&
+                diagnosticName.toLowerCase() != 'prescription'
+            ? diagnosticName
+            : (doctor.isNotEmpty
+                ? doctor
+                : (careSetting.isNotEmpty ? careSetting : 'Untitled visit')))
+        : (diagnosticName.isNotEmpty ? diagnosticName : 'Unknown Test');
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -3009,9 +3029,7 @@ class _ReportRecordCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        diagnosticName.isNotEmpty
-                            ? diagnosticName
-                            : 'Unknown Test',
+                        titleText,
                         style: AppTypography.raleway(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,

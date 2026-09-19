@@ -100,5 +100,11 @@ class BillingDepartments {
 }
 
 String formatBillingCurrency(double amount) {
-  return 'Rs. ${amount.toStringAsFixed(0)}';
+  final whole = amount.round().abs();
+  final formatted = whole.toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (m) => '${m[1]},',
+      );
+  final sign = amount < 0 ? '-' : '';
+  return 'Rs. $sign$formatted';
 }

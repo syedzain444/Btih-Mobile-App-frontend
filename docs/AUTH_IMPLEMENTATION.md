@@ -44,7 +44,7 @@ All auth endpoints now return a consistent JSON structure:
 ```json
 {
   "success": true,
-  "message": "Login successful",
+  "message": "Login Successful",
   "data": {
     "MR_NO": "010-002-152",
     "mrNo": "010-002-152",

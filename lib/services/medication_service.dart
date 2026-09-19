@@ -3,29 +3,19 @@ import 'dart:convert';
 import 'package:btih_andriod_app/models/current_medication_model.dart';
 import 'package:btih_andriod_app/models/medication_detail_model.dart';
 import 'package:btih_andriod_app/models/refill_request_model.dart';
+import 'package:btih_andriod_app/utils/api_response_helper.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
 
 class MedicationService {
-  Map<String, dynamic> _decodeBody(String body) {
-    if (body.trim().isEmpty) return {};
-    try {
-      final parsed = jsonDecode(body);
-      if (parsed is Map<String, dynamic>) return parsed;
-    } catch (_) {}
-    return {};
-  }
-
-  Never _throwFromResponse(int statusCode, Map<String, dynamic> decoded, String fallback) {
-    throw Exception(decoded['message']?.toString() ?? '$fallback (HTTP $statusCode)');
-  }
-
   Future<List<CurrentMedication>> getCurrentMedications(String mrNo) async {
     final response = await ApiConfig.client.get(
-      Uri.parse('${ApiConfig.baseUrl}/api/Medications/current/$mrNo'),
+      ApiResponseHelper.apiUri(
+        '/api/Medications/current/${ApiResponseHelper.encodePathSegment(mrNo)}',
+      ),
       headers: {'accept': 'application/json'},
     );
 
-    final decoded = _decodeBody(response.body);
+    final decoded = ApiResponseHelper.decodeBody(response.body);
     if (response.statusCode == 200) {
       final data = decoded['data'];
       if (data is List) {
@@ -37,7 +27,11 @@ class MedicationService {
       return [];
     }
 
-    _throwFromResponse(response.statusCode, decoded, 'Failed to load current medications');
+    ApiResponseHelper.throwFromResponse(
+      response.statusCode,
+      decoded,
+      'Failed to load current medications',
+    );
   }
 
   Future<MedicationDetail> getMedicationDetail({
@@ -45,13 +39,14 @@ class MedicationService {
     required int medicationId,
   }) async {
     final response = await ApiConfig.client.get(
-      Uri.parse(
-        '${ApiConfig.baseUrl}/api/Medications/$medicationId?mrNo=$mrNo',
+      ApiResponseHelper.apiUri(
+        '/api/Medications/$medicationId',
+        query: {'mrNo': mrNo},
       ),
       headers: {'accept': 'application/json'},
     );
 
-    final decoded = _decodeBody(response.body);
+    final decoded = ApiResponseHelper.decodeBody(response.body);
     if (response.statusCode == 200) {
       final data = decoded['data'];
       if (data is Map<String, dynamic>) {
@@ -60,7 +55,11 @@ class MedicationService {
       throw Exception('Medication detail response was invalid');
     }
 
-    _throwFromResponse(response.statusCode, decoded, 'Failed to load medication detail');
+    ApiResponseHelper.throwFromResponse(
+      response.statusCode,
+      decoded,
+      'Failed to load medication detail',
+    );
   }
 
   Future<RefillRequest> requestRefill({
@@ -70,20 +69,20 @@ class MedicationService {
     String? notes,
   }) async {
     final response = await ApiConfig.client.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/Medications/refill'),
+      ApiResponseHelper.apiUri('/api/Medications/refill'),
       headers: {
         'accept': 'application/json',
         'Content-Type': 'application/json',
       },
       body: jsonEncode({
-        'mrNo': mrNo,
+        'mrNo': mrNo.trim(),
         'medicationId': medicationId,
         if (quantity != null) 'quantity': quantity,
         if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
       }),
     );
 
-    final decoded = _decodeBody(response.body);
+    final decoded = ApiResponseHelper.decodeBody(response.body);
     if (response.statusCode == 200) {
       final data = decoded['data'];
       if (data is Map<String, dynamic>) {
@@ -92,7 +91,11 @@ class MedicationService {
       throw Exception('Refill request response was invalid');
     }
 
-    _throwFromResponse(response.statusCode, decoded, 'Failed to submit refill request');
+    ApiResponseHelper.throwFromResponse(
+      response.statusCode,
+      decoded,
+      'Failed to submit refill request',
+    );
   }
 
   Future<RefillRequest> getRefillStatus({
@@ -100,13 +103,14 @@ class MedicationService {
     required String mrNo,
   }) async {
     final response = await ApiConfig.client.get(
-      Uri.parse(
-        '${ApiConfig.baseUrl}/api/Medications/refill/$refillId?mrNo=$mrNo',
+      ApiResponseHelper.apiUri(
+        '/api/Medications/refill/$refillId',
+        query: {'mrNo': mrNo},
       ),
       headers: {'accept': 'application/json'},
     );
 
-    final decoded = _decodeBody(response.body);
+    final decoded = ApiResponseHelper.decodeBody(response.body);
     if (response.statusCode == 200) {
       final data = decoded['data'];
       if (data is Map<String, dynamic>) {
@@ -115,16 +119,22 @@ class MedicationService {
       throw Exception('Refill status response was invalid');
     }
 
-    _throwFromResponse(response.statusCode, decoded, 'Failed to load refill status');
+    ApiResponseHelper.throwFromResponse(
+      response.statusCode,
+      decoded,
+      'Failed to load refill status',
+    );
   }
 
   Future<List<RefillRequest>> getRefillHistory(String mrNo) async {
     final response = await ApiConfig.client.get(
-      Uri.parse('${ApiConfig.baseUrl}/api/Medications/refills/$mrNo'),
+      ApiResponseHelper.apiUri(
+        '/api/Medications/refills/${ApiResponseHelper.encodePathSegment(mrNo)}',
+      ),
       headers: {'accept': 'application/json'},
     );
 
-    final decoded = _decodeBody(response.body);
+    final decoded = ApiResponseHelper.decodeBody(response.body);
     if (response.statusCode == 200) {
       final data = decoded['data'];
       if (data is List) {
@@ -136,6 +146,10 @@ class MedicationService {
       return [];
     }
 
-    _throwFromResponse(response.statusCode, decoded, 'Failed to load refill requests');
+    ApiResponseHelper.throwFromResponse(
+      response.statusCode,
+      decoded,
+      'Failed to load refill requests',
+    );
   }
 }

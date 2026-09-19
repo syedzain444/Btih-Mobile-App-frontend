@@ -8,6 +8,8 @@ import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_theme.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
+import 'package:btih_andriod_app/services/app_lock_service.dart';
+import 'package:btih_andriod_app/widgets/app_lock_overlay.dart';
 import 'package:btih_andriod_app/widgets/session_lifecycle_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -22,6 +24,7 @@ Future<void> main() async {
   await ApiConfig.init();
   await AuthSession.init();
   await GuestSession.init();
+  await AppLockService.instance.init();
 
   if (!kIsWeb) {
     await Firebase.initializeApp(
@@ -49,14 +52,16 @@ class MyApp extends StatelessWidget {
       navigatorKey: appNavigatorKey,
       theme: AppTheme.light,
       builder: (context, child) {
-        return SessionLifecycleHandler(
-          child: DefaultTextStyle(
+        return AppLockOverlay(
+          child: SessionLifecycleHandler(
+            child: DefaultTextStyle(
             style: AppTypography.roboto(
               fontSize: 14,
               color: AppColors.darkText,
               height: 1.4,
             ),
             child: child ?? const SizedBox.shrink(),
+            ),
           ),
         );
       },

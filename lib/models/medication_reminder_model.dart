@@ -80,4 +80,18 @@ class MedicationReminder {
     final displayHour = hour % 12 == 0 ? 12 : hour % 12;
     return '${displayHour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
   }
+
+  String get formattedCreatedDate => _formatDate(createdAt);
+
+  String get formattedUpdatedDate => _formatDate(updatedAt);
+
+  static String _formatDate(DateTime? value) {
+    final d = value?.toLocal();
+    if (d == null) return '—';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
 }

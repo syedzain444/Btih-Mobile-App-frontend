@@ -1,14 +1,22 @@
 import 'package:btih_andriod_app/services/auth_session.dart';
+import 'package:btih_andriod_app/services/profile_photo_service.dart';
+import 'package:btih_andriod_app/services/security_preferences_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/utils/doctor_image_helper.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
+import 'package:btih_andriod_app/widgets/patient_avatar.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:image_cropper/image_cropper.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../models/patient_model.dart';
 import '../utils/cnic_input_formatter.dart';
 import '../utils/ip_file.dart';
@@ -39,11 +47,19 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
   final _contactController = TextEditingController();
   final _emailController = TextEditingController();
   final _cnicController = TextEditingController();
+  final _cnicFocusNode = FocusNode();
+  final _contactFocusNode = FocusNode();
 
+  bool _maskSensitiveFields = false;
   String? _selectedBloodGroup;
   String? _selectedGender;
   String _dobLabel = 'Not available';
   String _dateOfBirthRaw = '';
+  String? _profileImageUrl;
+  File? _localPreviewFile;
+  bool _photoBusy = false;
+  final _photoService = ProfilePhotoService();
+  final _imagePicker = ImagePicker();
 
   static const List<String> _bloodGroups = [
     'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-',
@@ -54,9 +70,14 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     MapEntry('F', 'Female'),
   ];
 
+  static const double _fieldGap = 14;
+  static const double _columnGap = 12;
+
   @override
   void initState() {
     super.initState();
+    _cnicFocusNode.addListener(() => setState(() {}));
+    _contactFocusNode.addListener(() => setState(() {}));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       fetchPatientData();
     });
@@ -69,6 +90,8 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     _contactController.dispose();
     _emailController.dispose();
     _cnicController.dispose();
+    _cnicFocusNode.dispose();
+    _contactFocusNode.dispose();
     super.dispose();
   }
 
@@ -99,6 +122,12 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
             ? PatientInfo.fromProfile(parsed.profile!)
             : PatientInfo.fromPatientVisit(parsed.visitHistory.first);
 
+        final maskPref = widget.isLoggedIn
+            ? await SecurityPreferencesService.getMaskSensitiveFields(
+                widget.mrNo,
+              )
+            : false;
+
         setState(() {
           patientInfo = info;
           _firstNameController.text = info.firstName;
@@ -110,8 +139,12 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
           _selectedGender = _normalizeGender(info.gender);
           _dateOfBirthRaw = info.dateOfBirth;
           _dobLabel = _formatDate(info.dateOfBirth);
+          _maskSensitiveFields = maskPref;
+          _profileImageUrl = DoctorImageHelper.resolve(info.profileImageUrl);
+          _localPreviewFile = null;
           isLoading = false;
         });
+        await AuthSession.updateProfileImageUrl(_profileImageUrl);
       } else {
         setState(() {
           isLoading = false;
@@ -359,11 +392,11 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       appBar: AppAppBar(
         centerTitle: true,
         title: Text(
-          'Patient Profile',
+          'Profile Management',
           style: AppTypography.raleway(
             fontSize: 20,
             fontWeight: FontWeight.w600,
@@ -396,7 +429,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
         ],
       ),
       body: ColoredBox(
-        color: AppColors.blush,
+        color: AppColors.white,
         child: isLoading
             ? _buildLoadingShimmer()
             : errorMessage.isNotEmpty
@@ -411,7 +444,8 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
       label: 'Update Profile',
       loading: isSaving,
       useBrandGradient: true,
-      height: 52,
+      fullWidth: false,
+      height: 48,
       onPressed: isSaving ? null : _updateProfile,
     );
   }
@@ -483,17 +517,263 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     );
   }
 
+  Widget _buildProfileAvatarSection(String displayName) {
+    final hasPhoto =
+        _localPreviewFile != null ||
+        (_profileImageUrl != null && _profileImageUrl!.isNotEmpty);
+
+    return Column(
+      children: [
+        Stack(
+          alignment: Alignment.bottomRight,
+          children: [
+            PatientAvatar(
+              displayName: displayName.isEmpty ? 'Patient' : displayName,
+              imageUrl: _profileImageUrl,
+              localFile: _localPreviewFile,
+              size: 104,
+              backgroundColor: AppColors.softRed,
+              foregroundColor: AppColors.deepRed,
+              showBorder: true,
+              borderColor: AppColors.deepRed.withValues(alpha: 0.25),
+            ),
+            TapFeedback(
+              onTap: _photoBusy ? null : _showPhotoOptions,
+              borderRadius: BorderRadius.circular(18),
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.duskMaroon,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.white, width: 2),
+                ),
+                child: _photoBusy
+                    ? const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.white,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.camera_alt_rounded,
+                        size: 16,
+                        color: AppColors.white,
+                      ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          hasPhoto ? 'Tap camera to change photo' : 'Add a profile photo',
+          style: AppTypography.roboto(
+            fontSize: 13,
+            color: AppColors.greyText,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showPhotoOptions() async {
+    final hasPhoto =
+        _localPreviewFile != null ||
+        (_profileImageUrl != null && _profileImageUrl!.isNotEmpty);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.fieldBorder,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Profile photo',
+                  style: AppTypography.raleway(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.darkText,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_outlined,
+                      color: AppColors.deepRed),
+                  title: const Text('Choose from gallery'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndUpload(ImageSource.gallery);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_camera_outlined,
+                      color: AppColors.deepRed),
+                  title: const Text('Take a photo'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndUpload(ImageSource.camera);
+                  },
+                ),
+                if (hasPhoto)
+                  ListTile(
+                    leading: const Icon(Icons.delete_outline,
+                        color: AppColors.primaryRed),
+                    title: const Text('Remove photo'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _removePhoto();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickAndUpload(ImageSource source) async {
+    if (_photoBusy) return;
+    try {
+      if (source == ImageSource.camera) {
+        final cam = await Permission.camera.request();
+        if (!cam.isGranted) {
+          if (!mounted) return;
+          CustomMessageDialog.showError(
+            context,
+            'Camera permission is required to take a profile photo.',
+          );
+          return;
+        }
+      } else {
+        final photos = await Permission.photos.request();
+        final storage = photos.isGranted
+            ? photos
+            : await Permission.storage.request();
+        if (!photos.isGranted && !storage.isGranted) {
+          if (!mounted) return;
+          CustomMessageDialog.showError(
+            context,
+            'Gallery permission is required to choose a profile photo.',
+          );
+          return;
+        }
+      }
+
+      final picked = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 2000,
+        maxHeight: 2000,
+        imageQuality: 95,
+      );
+      if (picked == null || !mounted) return;
+
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: picked.path,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        compressFormat: ImageCompressFormat.jpg,
+        compressQuality: 88,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Adjust photo',
+            toolbarColor: AppColors.deepRed,
+            toolbarWidgetColor: AppColors.white,
+            activeControlsWidgetColor: AppColors.primaryRed,
+            initAspectRatio: CropAspectRatioPreset.square,
+            lockAspectRatio: false,
+            hideBottomControls: false,
+            cropStyle: CropStyle.circle,
+          ),
+          IOSUiSettings(
+            title: 'Adjust photo',
+            aspectRatioLockEnabled: false,
+            resetAspectRatioEnabled: true,
+            cropStyle: CropStyle.circle,
+          ),
+        ],
+      );
+      if (cropped == null || !mounted) return;
+
+      final file = File(cropped.path);
+      setState(() {
+        _localPreviewFile = file;
+        _photoBusy = true;
+      });
+
+      final url = await _photoService.uploadPhoto(
+        mrNo: widget.mrNo,
+        file: file,
+      );
+      if (!mounted) return;
+      setState(() {
+        _profileImageUrl = url;
+        _localPreviewFile = null;
+        _photoBusy = false;
+      });
+      CustomMessageDialog.showSuccess(context, 'Profile photo updated');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _photoBusy = false);
+      CustomMessageDialog.showError(
+        context,
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    if (_photoBusy) return;
+    setState(() => _photoBusy = true);
+    try {
+      await _photoService.removePhoto(mrNo: widget.mrNo);
+      if (!mounted) return;
+      setState(() {
+        _profileImageUrl = null;
+        _localPreviewFile = null;
+        _photoBusy = false;
+      });
+      CustomMessageDialog.showSuccess(context, 'Profile photo removed');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _photoBusy = false);
+      CustomMessageDialog.showError(
+        context,
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
+
   Widget _buildProfileContent() {
+    final displayName =
+        '${_firstNameController.text} ${_lastNameController.text}'.trim();
+
     return Form(
       key: _formKey,
       child: SingleChildScrollView(
         physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildIntroBanner(),
-            const SizedBox(height: 24),
+            _buildProfileAvatarSection(displayName),
+            const SizedBox(height: 28),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -509,7 +789,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                     validator: (v) => _validateName(v, label: 'First name'),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: _columnGap),
                 Expanded(
                   child: _buildLineTextField(
                     controller: _lastNameController,
@@ -525,7 +805,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: _fieldGap),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -535,7 +815,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                     value: widget.mrNo,
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: _columnGap),
                 Expanded(
                   child: _buildReadOnlyLineField(
                     label: 'Date of Birth',
@@ -544,97 +824,41 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            _buildLineTextField(
+            const SizedBox(height: _fieldGap),
+            _buildSensitiveLineTextField(
               controller: _cnicController,
+              focusNode: _cnicFocusNode,
               label: 'CNIC',
+              maskValue: SecurityPreferencesService.maskCnic,
               keyboardType: TextInputType.number,
               inputFormatters: [CnicInputFormatter()],
               validator: _validateCnic,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: _fieldGap),
             _buildGenderSelector(),
-            const SizedBox(height: 20),
+            const SizedBox(height: _fieldGap),
             _buildBloodGroupSelector(),
-            const SizedBox(height: 20),
-            _buildLineTextField(
+            const SizedBox(height: _fieldGap),
+            _buildSensitiveLineTextField(
               controller: _contactController,
+              focusNode: _contactFocusNode,
               label: 'Contact Number',
+              maskValue: SecurityPreferencesService.maskPhone,
               keyboardType: TextInputType.phone,
               validator: (v) => v == null || v.trim().isEmpty
                   ? 'Contact is required'
                   : null,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: _fieldGap),
             _buildLineTextField(
               controller: _emailController,
               label: 'Email',
               keyboardType: TextInputType.emailAddress,
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
             _buildUpdateButton(),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildIntroBanner() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppColors.deepRed.withValues(alpha: 0.08),
-            AppColors.softRed.withValues(alpha: 0.5),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.fieldBorder),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              gradient: AppColors.heroGradient,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.manage_accounts_outlined,
-              color: AppColors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Your profile details',
-                  style: AppTypography.raleway(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.deepRed,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Keep your personal information up to date.',
-                  style: AppTypography.roboto(
-                    fontSize: 13,
-                    color: AppColors.greyText,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -658,7 +882,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
               style: _fieldLabelStyle(hasSelection),
               child: const Text('Gender'),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             Row(
               children: _genderOptions.map((option) {
                 final selected = _selectedGender == option.key;
@@ -698,7 +922,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 6),
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
                           height: selected ? 2 : 0,
@@ -720,7 +944,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
             ),
             if (state.hasError)
               Padding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   state.errorText!,
                   style: AppTypography.roboto(
@@ -759,7 +983,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                     style: _fieldLabelStyle(hasValue),
                     child: const Text('Blood Group'),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   Row(
                     children: [
                       Expanded(
@@ -784,7 +1008,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Container(
                     height: 1.2,
                     color: borderColor,
@@ -794,7 +1018,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
             ),
             if (state.hasError)
               Padding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   state.errorText!,
                   style: AppTypography.roboto(
@@ -819,7 +1043,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     return InputDecoration(
       isDense: true,
       filled: false,
-      contentPadding: const EdgeInsets.only(top: 2, bottom: 12),
+      contentPadding: const EdgeInsets.only(top: 0, bottom: 8),
       enabledBorder: UnderlineInputBorder(
         borderSide: hasError ? errorSide : normalSide,
       ),
@@ -833,9 +1057,90 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     );
   }
 
+  Widget _buildSensitiveLineTextField({
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required String label,
+    required String Function(String value) maskValue,
+    TextInputType keyboardType = TextInputType.text,
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+  }) {
+    final showMasked = _maskSensitiveFields &&
+        !focusNode.hasFocus &&
+        controller.text.trim().isNotEmpty;
+
+    if (showMasked) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: _fieldLabelStyle(true)),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  maskValue(controller.text),
+                  style: AppTypography.roboto(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.darkText,
+                  ),
+                ),
+              ),
+              TapFeedback(
+                onTap: _showUnmaskHintToast,
+                borderRadius: BorderRadius.circular(20),
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.visibility_outlined,
+                    size: 20,
+                    color: AppColors.deepRed,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Divider(
+            color: AppColors.hairline,
+            height: 1,
+            thickness: 1.2,
+          ),
+        ],
+      );
+    }
+
+    return _buildLineTextField(
+      controller: controller,
+      focusNode: focusNode,
+      label: label,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      validator: validator,
+    );
+  }
+
+  void _showUnmaskHintToast() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'To display your CNIC and contact number, turn off '
+          '"Mask CNIC & contact on profile" in Security Settings.',
+          style: AppTypography.roboto(fontSize: 14, color: AppColors.white),
+        ),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.deepRed,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Widget _buildLineTextField({
     required TextEditingController controller,
     required String label,
+    FocusNode? focusNode,
     TextInputType keyboardType = TextInputType.text,
     List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
@@ -850,9 +1155,10 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
           style: _fieldLabelStyle(hasValue),
           child: Text(label),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         TextFormField(
           controller: controller,
+          focusNode: focusNode,
           keyboardType: keyboardType,
           inputFormatters: inputFormatters,
           validator: validator,
@@ -885,7 +1191,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
           style: _fieldLabelStyle(hasValue),
           child: Text(label),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           value,
           maxLines: 1,
@@ -896,7 +1202,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
             color: AppColors.greyText.withValues(alpha: 0.85),
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         const Divider(
           color: AppColors.hairline,
           height: 1,

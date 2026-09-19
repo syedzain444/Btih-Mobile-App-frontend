@@ -9,6 +9,7 @@ import 'package:btih_andriod_app/services/auth_service.dart';
 import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/utils/auth_field_decoration.dart';
 import 'package:btih_andriod_app/utils/auth_validation.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
@@ -390,86 +391,39 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
     }
   }
 
-  InputDecoration _underlineField({required String hint, Widget? suffix}) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: AppTypography.roboto(fontSize: 14, color: AppColors.greyText),
-      suffixIcon: suffix,
-      contentPadding: const EdgeInsets.symmetric(vertical: 14),
-      enabledBorder: const UnderlineInputBorder(
-        borderSide: BorderSide(color: AppColors.hairline, width: 1.2),
-      ),
-      focusedBorder: const UnderlineInputBorder(
-        borderSide: BorderSide(color: AppColors.primaryRed, width: 2),
-      ),
-    );
-  }
-
   Widget _buildPhoneField() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.fieldBorder),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.fieldFill,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '🇵🇰',
-                  style: AppTypography.roboto(fontSize: 16),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '+92',
-                  style: AppTypography.raleway(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.darkText,
-                  ),
-                ),
-                const Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  size: 18,
-                  color: AppColors.greyText,
-                ),
-              ],
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 10),
+          child: Text(
+            '+92',
+            style: AppTypography.raleway(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.darkText,
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              maxLength: 10,
-              enabled: !_loading && !_sendingOtp,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style: AppTypography.roboto(
-                fontSize: 16,
-                color: AppColors.darkText,
-                letterSpacing: 0.5,
-              ),
-              decoration: const InputDecoration(
-                hintText: '3XX XXXXXXX',
-                counterText: '',
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 14),
-              ),
+        ),
+        Expanded(
+          child: TextField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            maxLength: 10,
+            enabled: !_loading && !_sendingOtp,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            style: AppTypography.roboto(
+              fontSize: 15,
+              color: AppColors.darkText,
+            ),
+            decoration: authUnderlineFieldDecoration(
+              hint: '3XX XXXXXXX',
+              counterText: '',
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -531,23 +485,12 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
           ),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+              padding: const EdgeInsets.fromLTRB(28, 25, 28, 28),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (_step == 1) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '',
-                        style: AppTypography.montserrat(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.darkText,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 8),
                     _buildPhoneField(),
                     const SizedBox(height: 8),
                     Align(
@@ -588,12 +531,9 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
                           fontWeight: FontWeight.w600,
                           color: AppColors.darkText,
                         ),
-                        decoration: _underlineField(hint: '000000').copyWith(
+                        decoration: authUnderlineFieldDecoration(
+                          hint: '000000',
                           counterText: '',
-                          prefixIcon: const Icon(
-                            Icons.sms_outlined,
-                            color: AppColors.greyText,
-                          ),
                         ),
                       ),
                     ),
@@ -641,7 +581,9 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
                         fontSize: 15,
                         color: AppColors.darkText,
                       ),
-                      decoration: _underlineField(hint: 'First Name'),
+                      decoration: authUnderlineFieldDecoration(
+                        hint: 'First Name',
+                      ),
                     ),
                     const SizedBox(height: 18),
                     TextField(
@@ -651,7 +593,9 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
                         fontSize: 15,
                         color: AppColors.darkText,
                       ),
-                      decoration: _underlineField(hint: 'Last Name (optional)'),
+                      decoration: authUnderlineFieldDecoration(
+                        hint: 'Last Name (optional)',
+                      ),
                     ),
                     const SizedBox(height: 18),
                     TextField(
@@ -662,7 +606,7 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
                         fontSize: 15,
                         color: AppColors.darkText,
                       ),
-                      decoration: _underlineField(
+                      decoration: authUnderlineFieldDecoration(
                         hint: 'Password',
                         suffix: IconButton(
                           icon: Icon(
@@ -687,7 +631,7 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
                         fontSize: 15,
                         color: AppColors.darkText,
                       ),
-                      decoration: _underlineField(
+                      decoration: authUnderlineFieldDecoration(
                         hint: 'Confirm Password',
                         suffix: IconButton(
                           icon: Icon(

@@ -17,7 +17,9 @@ class DischargeHistoryResponse {
       pageSize: json['pageSize'] ?? 10,
       totalRecords: json['totalRecords'] ?? 0,
       data: (json['data'] as List?)
-              ?.map((e) => DischargeRecord.fromJson(e))
+              ?.map((e) => DischargeRecord.fromJson(
+                    Map<String, dynamic>.from(e as Map),
+                  ))
               .toList() ??
           [],
     );
@@ -49,16 +51,85 @@ class DischargeRecord {
     required this.admissioN_OFFICER,
   });
 
+  static dynamic _pick(Map<String, dynamic> json, List<String> keys) {
+    for (final key in keys) {
+      if (json.containsKey(key) && json[key] != null) return json[key];
+    }
+    // Case-insensitive fallback for quirky serializer names.
+    final lower = {for (final e in json.entries) e.key.toLowerCase(): e.value};
+    for (final key in keys) {
+      final value = lower[key.toLowerCase()];
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  static int _asInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static DateTime _asDate(dynamic value) {
+    if (value is DateTime) return value;
+    return DateTime.tryParse(value?.toString() ?? '') ?? DateTime.now();
+  }
+
   factory DischargeRecord.fromJson(Map<String, dynamic> json) {
     return DischargeRecord(
-      mR_NO: json['mR_NO'] ?? '',
-      patienT_VISIT_ID: json['patienT_VISIT_ID'] ?? 0,
-      checK_IN: DateTime.tryParse(json['checK_IN'] ?? '') ?? DateTime.now(),
-      dR_OUT: DateTime.tryParse(json['dR_OUT'] ?? '') ?? DateTime.now(),
-      doctoR_NAME: json['doctoR_NAME'] ?? '',
-      admissioN_OFFICER: json['admissioN_OFFICER'] ?? '',
+      mR_NO: _pick(json, ['mR_NO', 'mrNo', 'MR_NO', 'mr_no'])?.toString() ?? '',
+      patienT_VISIT_ID: _asInt(_pick(json, [
+        'patienT_VISIT_ID',
+        'patientVisitId',
+        'PATIENT_VISIT_ID',
+        'patient_visit_id',
+      ])),
+      checK_IN: _asDate(_pick(json, [
+        'checK_IN',
+        'checkIn',
+        'CHECK_IN',
+        'check_in',
+      ])),
+      dR_OUT: _asDate(_pick(json, [
+        'dR_OUT',
+        'drOut',
+        'DR_OUT',
+        'dischargeDate',
+        'dr_out',
+      ])),
+      doctoR_NAME: _pick(json, [
+            'doctoR_NAME',
+            'doctorName',
+            'DOCTOR_NAME',
+            'doctor_name',
+          ])
+              ?.toString() ??
+          '',
+      admissioN_OFFICER: _pick(json, [
+            'admissioN_OFFICER',
+            'admissionOfficer',
+            'ADMISSION_OFFICER',
+            'admission_officer',
+          ])
+              ?.toString() ??
+          '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'mR_NO': mR_NO,
+        'patienT_VISIT_ID': patienT_VISIT_ID,
+        'checK_IN': checK_IN.toIso8601String(),
+        'dR_OUT': dR_OUT.toIso8601String(),
+        'doctoR_NAME': doctoR_NAME,
+        'admissioN_OFFICER': admissioN_OFFICER,
+        // Stable camelCase aliases for recent-activity / future clients.
+        'mrNo': mR_NO,
+        'patientVisitId': patienT_VISIT_ID,
+        'checkIn': checK_IN.toIso8601String(),
+        'dischargeDate': dR_OUT.toIso8601String(),
+        'doctorName': doctoR_NAME,
+        'admissionOfficer': admissioN_OFFICER,
+      };
 
   // Helper properties for UI
   String get formattedCheckInDate {
@@ -88,7 +159,7 @@ class DischargeRecord {
     final days = difference.inDays;
     final hours = difference.inHours % 24;
     final minutes = difference.inMinutes % 60;
-    
+
     if (days > 0) {
       return "$days day(s), $hours hour(s)";
     } else if (hours > 0) {

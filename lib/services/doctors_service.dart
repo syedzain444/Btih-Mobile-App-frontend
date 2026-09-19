@@ -43,7 +43,23 @@ class DoctorService {
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);
       if (body is! List) return [];
-      return body.map((e) => DoctorSchedule.fromJson(e)).toList();
+      final schedules = <DoctorSchedule>[];
+      for (final entry in body) {
+        if (entry is! Map) continue;
+        try {
+          final schedule = DoctorSchedule.fromJson(
+            Map<String, dynamic>.from(entry),
+          );
+          if (schedule.doctorId > 0 &&
+              schedule.dayName.isNotEmpty &&
+              schedule.hasValidTimes) {
+            schedules.add(schedule);
+          }
+        } catch (_) {
+          // Skip malformed schedule rows instead of failing the whole response.
+        }
+      }
+      return schedules;
     }
 
     if (response.statusCode == 404) {

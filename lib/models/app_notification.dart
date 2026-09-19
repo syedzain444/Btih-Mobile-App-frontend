@@ -2,18 +2,11 @@ import 'dart:convert';
 
 enum NotificationCategory {
   appointments,
+  medications,
   lab,
   records,
   billing,
   general,
-}
-
-enum NotificationFilter {
-  all,
-  appointments,
-  lab,
-  records,
-  billing,
 }
 
 enum NotificationType {
@@ -23,6 +16,7 @@ enum NotificationType {
   appointmentReminder,
   labReportAvailable,
   prescriptionAdded,
+  medicationReminder,
   gastroReportAvailable,
   radiologyReportAvailable,
   paymentConfirmed,
@@ -91,16 +85,39 @@ class AppNotification {
     };
   }
 
+  factory AppNotification.fromApiJson(Map<String, dynamic> json) {
+    final rawId = json['id'] ?? json['notificationId'];
+    final typeKey = (json['type'] ?? '').toString().toLowerCase();
+    final categoryKey = (json['category'] ?? 'general').toString().toLowerCase();
+    final priorityKey = (json['priority'] ?? 'normal').toString().toLowerCase();
+
+    return AppNotification(
+      id: rawId?.toString() ?? '',
+      type: _mapApiType(typeKey, categoryKey),
+      category: _mapApiCategory(categoryKey, typeKey),
+      priority: _mapApiPriority(priorityKey),
+      title: json['title'] as String? ?? 'Notification',
+      body: json['body'] as String? ?? '',
+      createdAt: _parseApiDate(json['createdAt']),
+      isRead: json['isRead'] == true,
+      payload: json['payload'] is Map
+          ? Map<String, dynamic>.from(json['payload'] as Map)
+          : null,
+    );
+  }
+
   factory AppNotification.fromJson(Map<String, dynamic> json) {
+    final type = NotificationType.values.firstWhere(
+      (value) => value.name == json['type'],
+      orElse: () => NotificationType.hospitalAnnouncement,
+    );
+    final rawCategory = (json['category'] as String?) ?? '';
     return AppNotification(
       id: json['id'] as String,
-      type: NotificationType.values.firstWhere(
-        (value) => value.name == json['type'],
-        orElse: () => NotificationType.hospitalAnnouncement,
-      ),
+      type: type,
       category: NotificationCategory.values.firstWhere(
-        (value) => value.name == json['category'],
-        orElse: () => NotificationCategory.general,
+        (value) => value.name == rawCategory,
+        orElse: () => _mapApiCategory(rawCategory, type.name),
       ),
       priority: NotificationPriority.values.firstWhere(
         (value) => value.name == json['priority'],
@@ -115,6 +132,100 @@ class AppNotification {
           ? Map<String, dynamic>.from(json['payload'] as Map)
           : null,
     );
+  }
+
+  static NotificationType _mapApiType(String typeKey, String categoryKey) {
+    if (typeKey.contains('medication')) {
+      return NotificationType.medicationReminder;
+    }
+    if (typeKey.contains('prescription')) {
+      return NotificationType.prescriptionAdded;
+    }
+    if (typeKey.contains('appointment') && typeKey.contains('remind')) {
+      return NotificationType.appointmentReminder;
+    }
+    if (typeKey.contains('appointment') && typeKey.contains('cancel')) {
+      return NotificationType.appointmentCancelled;
+    }
+    if (typeKey.contains('appointment') && typeKey.contains('confirm')) {
+      return NotificationType.appointmentConfirmed;
+    }
+    if (typeKey.contains('appointment') && typeKey.contains('resched')) {
+      return NotificationType.appointmentRescheduled;
+    }
+    if (typeKey.contains('follow')) {
+      return NotificationType.followUpReminder;
+    }
+    if (typeKey.contains('appointment')) {
+      return NotificationType.appointmentReminder;
+    }
+    if (typeKey.contains('report')) {
+      if (categoryKey == 'records') {
+        return NotificationType.radiologyReportAvailable;
+      }
+      return NotificationType.labReportAvailable;
+    }
+    if (typeKey.contains('profile')) {
+      return NotificationType.hospitalAnnouncement;
+    }
+    if (typeKey.contains('payment') && typeKey.contains('confirm')) {
+      return NotificationType.paymentConfirmed;
+    }
+    if (typeKey.contains('payment') || typeKey.contains('bill')) {
+      return NotificationType.paymentPending;
+    }
+    if (typeKey.contains('promo')) {
+      return NotificationType.hospitalPromotion;
+    }
+    return NotificationType.hospitalAnnouncement;
+  }
+
+  static NotificationCategory _mapApiCategory(String categoryKey, [String typeKey = '']) {
+    switch (categoryKey) {
+      case 'appointments':
+        return NotificationCategory.appointments;
+      case 'medications':
+        return NotificationCategory.medications;
+      case 'lab':
+        return NotificationCategory.lab;
+      case 'records':
+        return NotificationCategory.records;
+      case 'billing':
+        return NotificationCategory.billing;
+      default:
+        if (typeKey.contains('medication') || typeKey.contains('prescription')) {
+          return NotificationCategory.medications;
+        }
+        if (typeKey.contains('appointment') || typeKey.contains('follow')) {
+          return NotificationCategory.appointments;
+        }
+        if (typeKey.contains('payment') || typeKey.contains('bill')) {
+          return NotificationCategory.billing;
+        }
+        if (typeKey.contains('lab')) {
+          return NotificationCategory.lab;
+        }
+        return NotificationCategory.general;
+    }
+  }
+
+  static NotificationPriority _mapApiPriority(String priorityKey) {
+    switch (priorityKey) {
+      case 'high':
+        return NotificationPriority.high;
+      case 'low':
+        return NotificationPriority.low;
+      default:
+        return NotificationPriority.normal;
+    }
+  }
+
+  static DateTime _parseApiDate(dynamic raw) {
+    if (raw is DateTime) return raw;
+    if (raw is String && raw.isNotEmpty) {
+      return DateTime.tryParse(raw) ?? DateTime.now();
+    }
+    return DateTime.now();
   }
 
   static List<AppNotification> listFromJsonString(String raw) {
@@ -132,35 +243,31 @@ class AppNotification {
   }
 }
 
-extension NotificationFilterX on NotificationFilter {
-  String get label {
+extension NotificationCategoryX on NotificationCategory {
+  String get sectionTitle {
     switch (this) {
-      case NotificationFilter.all:
-        return 'All';
-      case NotificationFilter.appointments:
-        return 'Appointments';
-      case NotificationFilter.lab:
-        return 'Lab';
-      case NotificationFilter.records:
-        return 'Records';
-      case NotificationFilter.billing:
-        return 'Billing';
+      case NotificationCategory.appointments:
+        return 'Appointment Reminders';
+      case NotificationCategory.medications:
+        return 'Medication Reminders';
+      case NotificationCategory.lab:
+        return 'Lab Reports';
+      case NotificationCategory.records:
+        return 'Medical Records';
+      case NotificationCategory.billing:
+        return 'Payment Notifications';
+      case NotificationCategory.general:
+        return 'Hospital Updates';
     }
   }
 
-  bool matches(AppNotification notification) {
-    if (this == NotificationFilter.all) return true;
-    switch (this) {
-      case NotificationFilter.appointments:
-        return notification.category == NotificationCategory.appointments;
-      case NotificationFilter.lab:
-        return notification.category == NotificationCategory.lab;
-      case NotificationFilter.records:
-        return notification.category == NotificationCategory.records;
-      case NotificationFilter.billing:
-        return notification.category == NotificationCategory.billing;
-      case NotificationFilter.all:
-        return true;
-    }
-  }
+  /// Display order for categorized inbox sections.
+  static const List<NotificationCategory> sectionOrder = [
+    NotificationCategory.appointments,
+    NotificationCategory.medications,
+    NotificationCategory.lab,
+    NotificationCategory.records,
+    NotificationCategory.billing,
+    NotificationCategory.general,
+  ];
 }

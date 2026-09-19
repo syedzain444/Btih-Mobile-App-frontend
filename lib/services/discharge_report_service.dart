@@ -10,22 +10,30 @@ class DischargeReportService {
   
   Future<Response> generateDischargeReport({
     required int patientVisitId,
-    required int empId,
+    int empId = 0,
     int rptId = 35,
   }) async {
     final String url = "${ApiConfig.baseUrl}/api/PatientReport/DischargeReport?rptId=$rptId&param=$patientVisitId&empId=$empId";
     
-    _dio.options.connectTimeout = const Duration(seconds: 30);
-    _dio.options.receiveTimeout = const Duration(seconds: 30);
+    _dio.options.connectTimeout = const Duration(seconds: 60);
+    _dio.options.receiveTimeout = const Duration(seconds: 60);
     
     final response = await _dio.get(
       url,
       options: Options(responseType: ResponseType.bytes),
     );
     
-    // Validate if response is PDF
     final contentType = response.headers.value("content-type");
-    if (contentType == null || !contentType.contains("application/pdf")) {
+    final data = response.data;
+    final looksLikePdf = data is List<int> &&
+        data.length >= 4 &&
+        data[0] == 0x25 &&
+        data[1] == 0x50 &&
+        data[2] == 0x44 &&
+        data[3] == 0x46;
+
+    if (!looksLikePdf &&
+        (contentType == null || !contentType.contains("application/pdf"))) {
       throw Exception("Server did not return a valid PDF");
     }
     

@@ -56,7 +56,7 @@ class PatientRecordsScreen extends StatelessWidget {
         title: 'Discharge History',
         subtitle: 'Discharge summaries & hospital records',
         icon: Icons.summarize_outlined,
-        gradient: [AppColors.rustRed, AppColors.lightMaroon],
+        gradient: [AppColors.duskMaroon, AppColors.deepRed],
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(
@@ -82,7 +82,7 @@ class PatientRecordsScreen extends StatelessWidget {
     ];
 
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       appBar: AppAppBar(
         title: Text(
           'Records',
@@ -101,8 +101,6 @@ class PatientRecordsScreen extends StatelessWidget {
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
         children: [
-          _buildIntroBanner(),
-          const SizedBox(height: 24),
           _buildSection(
             title: 'Reports & Results',
             icon: Icons.assignment_outlined,
@@ -113,66 +111,6 @@ class PatientRecordsScreen extends StatelessWidget {
             title: 'Medical History',
             icon: Icons.timeline_outlined,
             modules: historyModules,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIntroBanner() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppColors.deepRed.withValues(alpha: 0.08),
-            AppColors.softRed.withValues(alpha: 0.5),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.fieldBorder),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              gradient: AppColors.heroGradient,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.medical_information_outlined,
-              color: AppColors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Your medical records',
-                  style: AppTypography.raleway(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.deepRed,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Tap a category below to view reports and history.',
-                  style: AppTypography.roboto(
-                    fontSize: 13,
-                    color: AppColors.greyText,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -220,7 +158,6 @@ class PatientRecordsScreen extends StatelessWidget {
           patientMrNo: patientMrNo,
           patientName: patientName,
           initialTabIndex: categoryIndex,
-          openCategoryDirectly: true,
         ),
       ),
     );

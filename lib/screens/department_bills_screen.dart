@@ -1,11 +1,12 @@
 import 'package:btih_andriod_app/models/patient_report_model.dart';
-import 'package:btih_andriod_app/services/billing_pdf_service.dart';
+import 'package:btih_andriod_app/services/recent_activity_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/billing_departments.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
 import 'package:btih_andriod_app/widgets/billing/billing_amount_card.dart';
+import 'package:btih_andriod_app/widgets/billing/invoice_details_modal.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:flutter/material.dart';
 
@@ -51,11 +52,13 @@ class BillHistoryFilters {
 }
 
 class DepartmentBillsScreen extends StatefulWidget {
+  final String patientMrNo;
   final BillingDepartment department;
   final List<PatientReport> reports;
 
   const DepartmentBillsScreen({
     super.key,
+    required this.patientMrNo,
     required this.department,
     required this.reports,
   });
@@ -68,7 +71,6 @@ class _DepartmentBillsScreenState extends State<DepartmentBillsScreen> {
   final _searchController = TextEditingController();
   BillSortOrder _sortOrder = BillSortOrder.latestFirst;
   BillHistoryFilters _filters = BillHistoryFilters.empty;
-  bool _isPdfBusy = false;
 
   @override
   void initState() {
@@ -205,28 +207,23 @@ class _DepartmentBillsScreenState extends State<DepartmentBillsScreen> {
     return '$hour:$minute $period';
   }
 
-  Future<void> _viewReport(PatientReport report) async {
-    if (_isPdfBusy) return;
-    setState(() => _isPdfBusy = true);
-    await BillingPdfService.viewInApp(
-      context,
-      rptId: widget.department.rptId,
-      billId: report.billId,
-      title: 'Bill #${report.billId}',
+  Future<void> _openInvoiceDetails(PatientReport report) {
+    RecentActivityService.instance.trackBill(
+      scopeId: RecentActivityService.instance.resolveScope(
+        patientMrNo: widget.patientMrNo,
+      ),
+      report: report.toJson(),
+      departmentCode: widget.department.code,
+      departmentName: widget.department.name,
+      rptId: report.reportId ?? widget.department.rptId,
     );
-    if (mounted) setState(() => _isPdfBusy = false);
-  }
 
-  Future<void> _downloadReport(PatientReport report) async {
-    if (_isPdfBusy) return;
-    setState(() => _isPdfBusy = true);
-    await BillingPdfService.downloadToDevice(
-      context,
-      rptId: widget.department.rptId,
-      billId: report.billId,
-      fileName: '${widget.department.code}_Bill${report.billId}.pdf',
+    return showInvoiceDetailsModal(
+      context: context,
+      patientMrNo: widget.patientMrNo,
+      report: report,
+      rptId: report.reportId ?? widget.department.rptId,
     );
-    if (mounted) setState(() => _isPdfBusy = false);
   }
 
   Future<void> _showFilterSheet() async {
@@ -373,61 +370,50 @@ class _DepartmentBillsScreenState extends State<DepartmentBillsScreen> {
     final tint = widget.department.gradient.first;
 
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       appBar: _buildAppBar(),
-      body: Stack(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              BillingAmountCard(
-                billCount: widget.reports.length,
-                totalAmount: _departmentTotal,
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: _buildSearchBar(),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _buildFilterSortRow(),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: widget.reports.isEmpty
-                    ? _buildEmpty()
-                    : filtered.isEmpty
-                        ? _buildNoResults()
-                        : ListView(
-                            physics: const BouncingScrollPhysics(
-                              parent: AlwaysScrollableScrollPhysics(),
-                            ),
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
-                            children: [
-                              ..._buildTimeline(filtered, tint),
-                              const SizedBox(height: 8),
-                              Center(
-                                child: Text(
-                                  'No more records',
-                                  style: AppTypography.roboto(
-                                    fontSize: 13,
-                                    color: AppColors.greyText
-                                        .withValues(alpha: 0.7),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-              ),
-            ],
+          BillingAmountCard(
+            billCount: widget.reports.length,
+            totalAmount: _departmentTotal,
           ),
-          if (_isPdfBusy)
-            Container(
-              color: Colors.black.withValues(alpha: 0.25),
-              child: const Center(
-                child: CircularProgressIndicator(color: AppColors.primaryRed),
-              ),
-            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: _buildSearchBar(),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _buildFilterSortRow(),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: widget.reports.isEmpty
+                ? _buildEmpty()
+                : filtered.isEmpty
+                    ? _buildNoResults()
+                    : ListView(
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                        children: [
+                          ..._buildTimeline(filtered, tint),
+                          const SizedBox(height: 8),
+                          Center(
+                            child: Text(
+                              'No more records',
+                              style: AppTypography.roboto(
+                                fontSize: 13,
+                                color: AppColors.greyText
+                                    .withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+          ),
         ],
       ),
     );
@@ -612,8 +598,7 @@ class _DepartmentBillsScreenState extends State<DepartmentBillsScreen> {
           formatDayMonth: _formatDayMonth,
           formatYear: _formatYear,
           formatTime: _formatTime,
-          onView: () => _viewReport(report),
-          onDownload: () => _downloadReport(report),
+          onOpenDetails: () => _openInvoiceDetails(report),
         ),
       );
       if (!isLast) widgets.add(const SizedBox(height: 4));
@@ -777,8 +762,7 @@ class _BillTimelineRow extends StatelessWidget {
   final String Function(String) formatDayMonth;
   final String Function(String) formatYear;
   final String Function(String) formatTime;
-  final VoidCallback onView;
-  final VoidCallback onDownload;
+  final VoidCallback onOpenDetails;
 
   const _BillTimelineRow({
     required this.report,
@@ -787,8 +771,7 @@ class _BillTimelineRow extends StatelessWidget {
     required this.formatDayMonth,
     required this.formatYear,
     required this.formatTime,
-    required this.onView,
-    required this.onDownload,
+    required this.onOpenDetails,
   });
 
   @override
@@ -864,7 +847,10 @@ class _BillTimelineRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Container(
+            child: TapFeedback(
+              onTap: onOpenDetails,
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -938,55 +924,33 @@ class _BillTimelineRow extends StatelessWidget {
                     style: AppTypography.montserrat(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
-                      color: const Color(0xFF2E7D32),
+                      color: AppColors.duskMaroon,
                     ),
                   ),
                   const SizedBox(height: 10),
                   Align(
                     alignment: Alignment.centerRight,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TapFeedback(
-                          onTap: onDownload,
+                    child: TapFeedback(
+                      onTap: onOpenDetails,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppColors.softRed,
                           borderRadius: BorderRadius.circular(20),
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: AppColors.softRed,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Icon(
-                              Icons.download_rounded,
-                              color: AppColors.primaryRed,
-                              size: 20,
-                            ),
-                          ),
                         ),
-                        const SizedBox(width: 8),
-                        TapFeedback(
-                          onTap: onView,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: AppColors.softRed,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Icon(
-                              Icons.remove_red_eye_outlined,
-                              color: AppColors.primaryRed,
-                              size: 20,
-                            ),
-                          ),
+                        child: const Icon(
+                          Icons.remove_red_eye_outlined,
+                          color: AppColors.deepRed,
+                          size: 20,
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ],
               ),
+            ),
             ),
           ),
         ],

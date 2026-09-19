@@ -39,6 +39,9 @@ class AppColors {
   static const Color medsTeal = Color(0xFF2B7A74);
   static const Color medsTealBg = Color(0xFFD9EFEB);
   static const Color medsCardBg = Color(0xFFEEF8F6);
+  /// Very light blush for Active prescriptions (matches meds card lightness).
+  static const Color rxCardBg = Color(0xFFFBF6F7);
+  static const Color rxIconBg = Color(0xFFF3E4E7);
   static const Color activityPurple = Color(0xFF6A4C93);
   static const Color activityPurpleBg = Color(0xFFEAE3F3);
 

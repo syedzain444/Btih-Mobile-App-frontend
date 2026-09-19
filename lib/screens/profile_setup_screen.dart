@@ -6,6 +6,7 @@ import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:btih_andriod_app/services/patient_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/utils/auth_field_decoration.dart';
 import 'package:btih_andriod_app/utils/cnic_input_formatter.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
@@ -330,7 +331,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   child: _buildField(
                     controller: _firstNameController,
                     label: 'First Name',
-                    icon: Icons.person_outline,
                     validator: (v) => _validateName(v, label: 'First name'),
                   ),
                 ),
@@ -339,7 +339,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   child: _buildField(
                     controller: _lastNameController,
                     label: 'Last Name',
-                    icon: Icons.person_outline,
                     required: false,
                   ),
                 ),
@@ -352,7 +351,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   child: _buildReadOnly(
                     label: 'MR No.',
                     value: widget.mrNo,
-                    icon: Icons.badge_outlined,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -361,7 +359,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       ? _buildReadOnly(
                           label: 'Date of Birth',
                           value: _dobLabel,
-                          icon: Icons.cake_outlined,
                         )
                       : _buildDateOfBirthPicker(),
                 ),
@@ -371,7 +368,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             _buildField(
               controller: _cnicController,
               label: 'CNIC',
-              icon: Icons.credit_card_outlined,
               keyboardType: TextInputType.number,
               inputFormatters: [CnicInputFormatter()],
               validator: _validateCnic,
@@ -384,7 +380,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             _buildField(
               controller: _contactController,
               label: 'Contact',
-              icon: Icons.phone_outlined,
               keyboardType: TextInputType.phone,
               validator: (v) =>
                   v == null || v.trim().isEmpty ? 'Contact is required' : null,
@@ -393,7 +388,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             _buildField(
               controller: _emailController,
               label: 'Email',
-              icon: Icons.email_outlined,
               keyboardType: TextInputType.emailAddress,
               required: false,
             ),
@@ -463,7 +457,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget _buildField({
     required TextEditingController controller,
     required String label,
-    required IconData icon,
     String? Function(String?)? validator,
     TextInputType? keyboardType,
     List<TextInputFormatter>? inputFormatters,
@@ -478,25 +471,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           (required
               ? (v) => v == null || v.trim().isEmpty ? '$label is required' : null
               : null),
-      style: AppTypography.roboto(fontSize: 14, color: AppColors.darkText),
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: AppColors.primaryRed, size: 20),
-        filled: true,
-        fillColor: AppColors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.fieldBorder),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.fieldBorder),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.primaryRed, width: 1.4),
-        ),
-      ),
+      style: AppTypography.roboto(fontSize: 15, color: AppColors.darkText),
+      decoration: authUnderlineFieldDecoration(hint: label),
     );
   }
 
@@ -529,29 +505,38 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   }
 
   Widget _buildDateOfBirthPicker() {
+    final hasValue = _dobLabel != 'Not available';
+
     return TapFeedback(
       onTap: _saving ? null : _pickDateOfBirth,
-      borderRadius: BorderRadius.circular(12),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: 'Date of Birth',
-          prefixIcon: const Icon(Icons.cake_outlined, color: AppColors.primaryRed),
-          filled: true,
-          fillColor: AppColors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.fieldBorder),
+      borderRadius: BorderRadius.circular(4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            hasValue ? 'Date of Birth' : 'Select date of birth',
+            style: AppTypography.roboto(
+              fontSize: hasValue ? 12 : 14,
+              color: AppColors.greyText,
+            ),
           ),
-        ),
-        child: Text(
-          _dobLabel == 'Not available' ? 'Select date of birth' : _dobLabel,
-          style: AppTypography.roboto(
-            fontSize: 14,
-            color: _dobLabel == 'Not available'
-                ? AppColors.greyText
-                : AppColors.darkText,
+          if (hasValue) ...[
+            const SizedBox(height: 4),
+            Text(
+              _dobLabel,
+              style: AppTypography.roboto(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: AppColors.darkText,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Container(
+            height: 1.2,
+            color: AppColors.hairline,
           ),
-        ),
+        ],
       ),
     );
   }
@@ -559,27 +544,32 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   Widget _buildReadOnly({
     required String label,
     required String value,
-    required IconData icon,
   }) {
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: AppColors.greyText, size: 20),
-        filled: true,
-        fillColor: AppColors.fieldFill,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.fieldBorder),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: AppTypography.roboto(
+            fontSize: 12,
+            color: AppColors.greyText,
+          ),
         ),
-      ),
-      child: Text(
-        value,
-        style: AppTypography.roboto(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: AppColors.darkText,
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: AppTypography.roboto(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            color: AppColors.darkText,
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Container(
+          height: 1.2,
+          color: AppColors.hairline,
+        ),
+      ],
     );
   }
 

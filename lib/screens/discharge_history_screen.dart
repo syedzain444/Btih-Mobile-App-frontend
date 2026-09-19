@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:btih_andriod_app/models/discharge_history_model.dart';
 import 'package:btih_andriod_app/services/discharge_history_service.dart';
 import 'package:btih_andriod_app/services/discharge_report_service.dart';
+import 'package:btih_andriod_app/services/recent_activity_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/dashboard_helpers.dart';
@@ -78,10 +79,12 @@ class DischargeHistoryFilters {
 
 class DischargeHistoryScreen extends StatefulWidget {
   final String patientMrNo;
+  final Map<String, dynamic>? autoOpenRecord;
 
   const DischargeHistoryScreen({
     super.key,
     required this.patientMrNo,
+    this.autoOpenRecord,
   });
 
   @override
@@ -105,6 +108,7 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
   int _totalPages = 0;
   DischargeSortOrder _sortOrder = DischargeSortOrder.latestFirst;
   DischargeHistoryFilters _filters = DischargeHistoryFilters.empty;
+  bool _didAutoOpenRecord = false;
 
   @override
   void initState() {
@@ -159,6 +163,8 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
           curve: Curves.easeOut,
         );
       }
+
+      _maybeAutoOpenRecord();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -189,6 +195,16 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
   }
 
   Future<void> _refreshCurrentPage() => _loadPage(_pageNumber, resetScroll: false);
+
+  void _maybeAutoOpenRecord() {
+    final raw = widget.autoOpenRecord;
+    if (_didAutoOpenRecord || raw == null || !mounted) return;
+    _didAutoOpenRecord = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _viewDischargeReport(DischargeRecord.fromJson(raw));
+    });
+  }
 
   List<int> get _availableYears {
     final years = _pageRecords.map((r) => r.dR_OUT.year).toSet().toList()
@@ -312,7 +328,7 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
   Future<List<int>> _fetchDischargePdfBytes(DischargeRecord record) async {
     final response = await _reportService.generateDischargeReport(
       patientVisitId: record.patienT_VISIT_ID,
-      empId: 82,
+      empId: 0,
       rptId: 35,
     );
 
@@ -388,6 +404,13 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
   Future<void> _viewDischargeReport(DischargeRecord record) async {
     if (_reportActionInProgress) return;
     _reportActionInProgress = true;
+
+    RecentActivityService.instance.trackDischarge(
+      scopeId: RecentActivityService.instance.resolveScope(
+        patientMrNo: widget.patientMrNo,
+      ),
+      record: record.toJson(),
+    );
 
     showDialog(
       context: context,
@@ -492,7 +515,7 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => Scaffold(
-          backgroundColor: AppColors.scaffoldBg,
+          backgroundColor: AppColors.white,
           appBar: AppAppBar(
             title: Text(
               fileName,
@@ -514,12 +537,15 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
               ),
             ],
           ),
-          body: SfPdfViewer.file(
-            File(filePath),
-            pageLayoutMode: PdfPageLayoutMode.single,
-            canShowScrollHead: true,
-            canShowScrollStatus: true,
-            enableDoubleTapZooming: true,
+          body: ColoredBox(
+            color: AppColors.white,
+            child: SfPdfViewer.file(
+              File(filePath),
+              pageLayoutMode: PdfPageLayoutMode.single,
+              canShowScrollHead: true,
+              canShowScrollStatus: true,
+              enableDoubleTapZooming: true,
+            ),
           ),
         ),
       ),

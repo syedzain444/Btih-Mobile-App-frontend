@@ -2,18 +2,19 @@ import 'dart:async';
 import 'dart:io' show HttpClient, Platform;
 
 import 'package:btih_andriod_app/services/auth_session.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Resolves the HMIS API base URL automatically and remembers what worked.
 ///
-/// Platform-specific cache keys prevent Chrome from reusing an Android URL
-/// (and vice versa). Use `--dart-define=API_MODE=local` in dev scripts so
-/// debug builds never auto-switch to production when the hospital LAN is up.
+/// Default target is the hospital production API on `.93:7078`.
+/// Use `--dart-define=API_MODE=local` (and optional `API_HOST`) only when you
+/// intentionally want the local `dotnet run` backend.
 class ApiConfig {
   ApiConfig._();
 
@@ -28,12 +29,15 @@ class ApiConfig {
   static const String productionSwaggerUrl =
       '$productionBaseUrl/Swagger/index.html';
 
-  /// Default when no local API is reachable (production).
+  /// Default API target (production on .93).
   static const String defaultBaseUrl = productionBaseUrl;
-  static const String swaggerUrl = localDevSwaggerUrl;
+  static const String swaggerUrl = productionSwaggerUrl;
 
-  /// USB tunnel via adb reverse (phone not on hospital Wi‑Fi).
+  /// USB tunnel via adb reverse for the **local** API (port 8080).
   static const String usbTunnelBaseUrl = 'http://127.0.0.1:8080';
+
+  /// USB tunnel via adb reverse for the **hospital** API (port 7078).
+  static const String productionUsbTunnelBaseUrl = 'http://127.0.0.1:7078';
 
   static const int localDevPort = 8080;
   static const int productionPort = 7078;
@@ -65,11 +69,10 @@ class ApiConfig {
   static String get _savedUrlKey => 'api_base_url_$_platformId';
   static String get _customUrlKey => 'api_custom_url_$_platformId';
 
-  /// Best default when [ensureResolved] has not run yet (debug builds).
-  static String get defaultDebugBaseUrl => _preferredLocalDevUrl();
+  /// Best default before [ensureResolved] finishes — always production.
+  static String get defaultDebugBaseUrl => defaultBaseUrl;
 
-  static String get baseUrl =>
-      _resolvedBaseUrl ?? (kDebugMode ? defaultDebugBaseUrl : defaultBaseUrl);
+  static String get baseUrl => _resolvedBaseUrl ?? defaultBaseUrl;
 
   static String? get lastProbeError => _lastProbeError;
 
@@ -130,7 +133,9 @@ class ApiConfig {
   static Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
-    await ensureResolved();
+    // Wipe any stale localhost cache left by older APKs.
+    await clearCachedApiUrl();
+    await ensureResolved(force: true);
   }
 
   static void invalidate() {
@@ -172,7 +177,25 @@ class ApiConfig {
   }
 
   static Future<bool> ensureResolved({bool force = false}) async {
+    const envHost = String.fromEnvironment('API_HOST');
+    // Default is production (.93). Use API_MODE=local only for local API work.
+    const apiMode =
+        String.fromEnvironment('API_MODE', defaultValue: 'production');
+
+    // Fast path: already pinned to a working URL.
     if (!force && _resolvedBaseUrl != null) {
+      if (apiMode == 'production' &&
+          (_resolvedBaseUrl == productionBaseUrl ||
+              _resolvedBaseUrl == productionUsbTunnelBaseUrl)) {
+        return true;
+      }
+      if (apiMode == 'local' && _isLocalDevUrl(_resolvedBaseUrl!)) {
+        return true;
+      }
+      if (envHost.isNotEmpty &&
+          _normalize(envHost) == _normalize(_resolvedBaseUrl!)) {
+        return true;
+      }
       if (await _probeFast(_resolvedBaseUrl!)) {
         return true;
       }
@@ -181,9 +204,6 @@ class ApiConfig {
 
     _lastProbeError = null;
     _activeEnvironment = null;
-
-    const envHost = String.fromEnvironment('API_HOST');
-    const apiMode = String.fromEnvironment('API_MODE', defaultValue: 'auto');
 
     final prefs = await SharedPreferences.getInstance();
     await _migrateLegacyKeys(prefs);
@@ -195,28 +215,78 @@ class ApiConfig {
     savedUrl = prefs.getString(_savedUrlKey);
     customUrl = prefs.getString(_customUrlKey);
 
-    // 1. Explicit build-time override (run-*-local-dev.bat sets this).
-    if (envHost.isNotEmpty) {
-      final url = _normalize(envHost);
-      if (await _probeFast(url)) {
-        return _saveResolved(url, 'override', prefs);
+    // Drop cached *local-dev* (8080) URLs when targeting production APKs.
+    // Keep production USB tunnel (127.0.0.1:7078) — that is intentional for
+    // run-dev.bat option 3.
+    if (apiMode != 'local') {
+      if (savedUrl != null && _isLocalDevUrl(savedUrl)) {
+        await prefs.remove(_savedUrlKey);
+        savedUrl = null;
       }
-      if (kDebugMode) {
-        return _saveResolved(url, 'override', prefs, persist: false);
+      if (customUrl != null && _isLocalDevUrl(customUrl)) {
+        await prefs.remove(_customUrlKey);
+        customUrl = null;
       }
     }
 
-    final localOnly = apiMode == 'local' || (kDebugMode && apiMode == 'auto');
-    final productionOnly = apiMode == 'production';
+    // 1. Explicit build-time override from run-dev.bat (options 1 / 2 / 3).
+    if (envHost.isNotEmpty) {
+      final url = _normalize(envHost);
+      final envLabel = _environmentForUrl(url);
+      final reachable = await _probeFast(url);
+      if (reachable) {
+        // ignore: avoid_print
+        print('[ApiConfig] API_HOST override → $url (mode=$apiMode, env=$envLabel)');
+        return _saveResolved(
+          url,
+          envLabel == 'local' ? 'override-local' : 'override',
+          prefs,
+        );
+      }
 
-    // 2. Local dev — Chrome, AnyDesk Chrome, Android USB, emulator.
+      // USB tunnel dart-define is present but adb reverse / PC proxy is down.
+      if (_isProductionUsbTunnelUrl(url)) {
+        // Never pin a dead tunnel — use live hospital host instead.
+        // ignore: avoid_print
+        print(
+          '[ApiConfig] USB tunnel unreachable — using $productionBaseUrl',
+        );
+        return _saveResolved(productionBaseUrl, 'production', prefs);
+      }
+
+      // Non-tunnel override (e.g. LAN IP): keep it even if Swagger probe is slow.
+      // ignore: avoid_print
+      print(
+        '[ApiConfig] API_HOST override (probe failed, still using) → $url',
+      );
+      return _saveResolved(
+        url,
+        envLabel == 'local' ? 'override-local' : 'override',
+        prefs,
+      );
+    }
+
+    // 2. Production — prefer USB tunnel only when it actually responds.
+    if (apiMode == 'production') {
+      final target = await _pickProductionBaseUrl();
+      // ignore: avoid_print
+      print('[ApiConfig] production → $target');
+      return _saveResolved(target, 'production', prefs);
+    }
+
+    final localOnly = apiMode == 'local';
+    final productionPreferred = apiMode == 'auto';
+
+    // 3. Local-only mode — never touch .93.
     if (localOnly) {
       if (customUrl != null && await _probeFast(customUrl)) {
         return _saveResolved(customUrl, 'custom', prefs);
       }
 
-      for (final localUrl in _localDevCandidates()) {
+      for (final localUrl in await _localDevCandidates()) {
         if (await _probeFast(localUrl)) {
+          // ignore: avoid_print
+          print('[ApiConfig] local → $localUrl');
           return _saveResolved(localUrl, 'local', prefs);
         }
       }
@@ -227,33 +297,39 @@ class ApiConfig {
         return _saveResolved(savedUrl, 'local', prefs, persist: false);
       }
 
-      if (kDebugMode) {
-        final fallback = _preferredLocalDevUrl();
-        return _saveResolved(fallback, 'local', prefs, persist: false);
+      final localCandidates = await _buildCandidates(
+        savedUrl: savedUrl,
+        customUrl: customUrl,
+        includeProduction: false,
+      );
+      final localWorking = await _probeFirstMatch(localCandidates);
+      if (localWorking != null) {
+        return _saveResolved(
+          localWorking,
+          _environmentForUrl(localWorking),
+          prefs,
+        );
       }
+
+      // Still pin the best local candidate so login can attempt the call.
+      final localList = await _localDevCandidates();
+      final fallbackLocal =
+          localList.isNotEmpty ? localList.first : localDevBaseUrl;
+      // ignore: avoid_print
+      print('[ApiConfig] local fallback (unreachable yet) → $fallbackLocal');
+      _lastProbeError = _buildLocalConnectionError(fallbackLocal);
+      return _saveResolved(fallbackLocal, 'local', prefs);
     }
 
-    // 3. Production-only mode (release builds against hospital server).
-    if (productionOnly) {
+    // 4. Auto mode — production first, then local fallback.
+    if (productionPreferred) {
       if (await _resolveProduction(prefs)) {
         return true;
       }
+      // Pin production anyway so the APK can still attempt live calls.
+      return _saveResolved(productionBaseUrl, 'production', prefs);
     }
 
-    // 4. Release auto — production first, then local fallbacks.
-    if (!kDebugMode && apiMode == 'auto') {
-      if (await _resolveProduction(prefs)) {
-        return true;
-      }
-
-      for (final localUrl in _localDevCandidates()) {
-        if (await _probeFast(localUrl)) {
-          return _saveResolved(localUrl, 'local', prefs);
-        }
-      }
-    }
-
-    // 5. Saved / custom URLs (non-debug auto, or explicit custom host).
     if (customUrl != null && await _probeFast(customUrl)) {
       return _saveResolved(customUrl, 'custom', prefs);
     }
@@ -262,121 +338,142 @@ class ApiConfig {
       return _saveResolved(savedUrl, 'custom', prefs, persist: false);
     }
 
-    // 6. Broad probe list (release builds only reach here in auto mode).
-    if (!localOnly) {
-      if (await _resolveProduction(prefs)) {
-        return true;
-      }
-    }
-
-    final candidates = _buildCandidates(
+    final candidates = await _buildCandidates(
       savedUrl: savedUrl,
       customUrl: customUrl,
-      includeProduction: !localOnly,
+      includeProduction: true,
     );
 
     final working = await _probeFirstMatch(candidates);
     if (working != null) {
-      final env = _environmentForUrl(working);
-      return _saveResolved(working, env, prefs);
+      return _saveResolved(working, _environmentForUrl(working), prefs);
     }
 
-    if (kDebugMode && localOnly) {
-      final fallback = _preferredLocalDevUrl();
-      return _saveResolved(fallback, 'local', prefs, persist: false);
-    }
-
-    _lastProbeError = _buildConnectionError(candidates.length);
-    return false;
+    // Last resort for APK + live URL: still pin production.
+    return _saveResolved(productionBaseUrl, 'production', prefs);
   }
 
   static Future<bool> _resolveProduction(SharedPreferences prefs) async {
-    if (await _probeFast(productionBaseUrl) &&
-        await _productionHasNewAuthApis(productionBaseUrl)) {
-      return _saveResolved(productionBaseUrl, 'production', prefs);
+    final target = await _pickProductionBaseUrl();
+    return _saveResolved(target, 'production', prefs);
+  }
+
+  /// Physical Android: use USB tunnel only when it responds; otherwise .93.
+  /// Emulator / desktop: prefer direct hospital LAN URL.
+  static Future<String> _pickProductionBaseUrl() async {
+    final physicalAndroid = await _isPhysicalAndroidDevice();
+
+    if (physicalAndroid) {
+      if (await _probeFast(productionUsbTunnelBaseUrl)) {
+        return productionUsbTunnelBaseUrl;
+      }
+      if (await _probeFast(productionBaseUrl)) {
+        return productionBaseUrl;
+      }
+      // Never default to a dead tunnel — .93 is the real production host.
+      return productionBaseUrl;
     }
 
     if (await _probeFast(productionBaseUrl)) {
-      return _saveResolved(productionBaseUrl, 'production', prefs);
+      return productionBaseUrl;
     }
+    if (await _probeFast(productionUsbTunnelBaseUrl)) {
+      return productionUsbTunnelBaseUrl;
+    }
+    return productionBaseUrl;
+  }
 
-    if (!kIsWeb) {
-      final usbProdTunnel = 'http://127.0.0.1:$productionPort';
-      if (await _probeFast(usbProdTunnel)) {
-        return _saveResolved(usbProdTunnel, 'production', prefs);
+  static bool _isProductionUsbTunnelUrl(String url) {
+    final normalized = _normalize(url);
+    return normalized == productionUsbTunnelBaseUrl ||
+        (normalized.contains('127.0.0.1') &&
+            normalized.endsWith(':$productionPort'));
+  }
+
+  /// Force the next requests through the USB tunnel (after a .93 failure).
+  static Future<bool> preferProductionUsbTunnel() async {
+    if (!await _probeFast(productionUsbTunnelBaseUrl)) {
+      // ignore: avoid_print
+      print('[ApiConfig] USB tunnel not available — keeping current host');
+      return false;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await _saveResolved(productionUsbTunnelBaseUrl, 'production', prefs);
+    // ignore: avoid_print
+    print('[ApiConfig] switched to USB tunnel → $productionUsbTunnelBaseUrl');
+    return true;
+  }
+
+  /// Force direct hospital API (after USB tunnel connection refused).
+  static Future<void> preferDirectProduction() async {
+    final prefs = await SharedPreferences.getInstance();
+    await _saveResolved(productionBaseUrl, 'production', prefs);
+    // ignore: avoid_print
+    print('[ApiConfig] switched to direct production → $productionBaseUrl');
+  }
+
+  static bool get isUsingProductionUsbTunnel =>
+      _isProductionUsbTunnelUrl(_resolvedBaseUrl ?? defaultBaseUrl);
+
+  static bool? _physicalAndroidCache;
+
+  static Future<bool> _isPhysicalAndroidDevice() async {
+    if (!kIsWeb && Platform.isAndroid) {
+      if (_physicalAndroidCache != null) {
+        return _physicalAndroidCache!;
+      }
+      try {
+        final info = await DeviceInfoPlugin().androidInfo;
+        _physicalAndroidCache = info.isPhysicalDevice;
+        return info.isPhysicalDevice;
+      } catch (_) {
+        return true;
       }
     }
-
     return false;
   }
 
-  static String _preferredLocalDevUrl() {
-    const envHost = String.fromEnvironment('API_HOST');
-    if (envHost.isNotEmpty) {
-      return _normalize(envHost);
-    }
-    if (kIsWeb) {
-      return localDevBaseUrl;
-    }
-    if (!kIsWeb && Platform.isAndroid) {
-      return 'http://10.0.2.2:$localDevPort';
-    }
-    return localDevBaseUrl;
-  }
-
+  /// True for local-dev targets (port 8080 / emulator), not hospital USB tunnel.
   static bool _isLocalDevUrl(String url) {
     final normalized = _normalize(url);
-    if (_localDevCandidates().contains(normalized)) {
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || uri.host.isEmpty) return false;
+
+    final port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
+    if (port == productionPort) {
+      // 127.0.0.1:7078 is the hospital API USB tunnel (run-dev option 3).
+      return false;
+    }
+
+    if (port == localDevPort) {
       return true;
     }
-    return normalized.endsWith(':$localDevPort');
+
+    final host = uri.host.toLowerCase();
+    return host == '10.0.2.2' ||
+        host == 'localhost' ||
+        host == '127.0.0.1';
   }
 
   static String _buildConnectionError(int triedCount) {
-    if (kIsWeb) {
-      return 'Cannot reach the HMIS API server.\n\n'
-          '1. Start API: cd Btih-Mobile-App-backend && dotnet run --launch-profile http\n'
-          '2. Open $localDevSwaggerUrl in Chrome (must show Swagger UI)\n'
-          '3. Run run-dev.bat and choose Chrome (option 1)\n'
-          '   (sets API_HOST + API_MODE=local automatically)\n'
-          '4. Hot restart (R)\n\n'
-          'Works the same on AnyDesk — localhost is the remote PC.\n'
-          'Tried $triedCount addresses.';
-    }
-    final platformHint = _platformConnectionHint();
-    return 'Cannot reach the HMIS API server.\n\n'
-        'Local dev: $localDevSwaggerUrl\n'
-        'Production: $productionSwaggerUrl\n'
-        'Tried $triedCount addresses.\n\n'
-        '$platformHint';
+    return 'Cannot reach the HMIS API.\n\n'
+        'Tried: $productionBaseUrl\n'
+        'USB tunnel: $productionUsbTunnelBaseUrl\n\n'
+        'For phone over USB (run-dev.bat option 3):\n'
+        '1. Keep USB connected with debugging on\n'
+        '2. Confirm: adb reverse --list shows tcp:7078\n'
+        '3. Fully restart Flutter (not hot reload)\n\n'
+        'Or join hospital Wi‑Fi and open:\n'
+        '$productionSwaggerUrl';
   }
 
-  static String _platformConnectionHint() {
-    if (kIsWeb) {
-      return 'Chrome / web:\n'
-          '1. Run run-dev.bat → option 1 Chrome (repo root)\n'
-          '2. Or: flutter run -d chrome '
-          '--dart-define=API_HOST=http://localhost:8080 '
-          '--dart-define=API_MODE=local\n'
-          '3. Hot restart (R) — not just hot reload';
-    }
-    if (!kIsWeb && Platform.isAndroid) {
-      return 'Android emulator:\n'
-          '1. Backend: dotnet run --launch-profile http (listens on 0.0.0.0:8080)\n'
-          '2. App uses http://10.0.2.2:8080 automatically\n'
-          '3. Hot restart (R)\n\n'
-          'Android physical device (USB):\n'
-          '1. Run run-dev.bat → option 2 Android (repo root)\n'
-          '   (starts local API + adb reverse tcp:8080)\n'
-          '2. Or manually: adb reverse tcp:8080 tcp:8080\n'
-          '   then flutter run '
-          '--dart-define=API_HOST=http://127.0.0.1:8080 '
-          '--dart-define=API_MODE=local';
-    }
-    return 'Local dev (PC):\n'
-        '1. cd Btih-Mobile-App-backend && dotnet run --launch-profile http\n'
-        '2. Open $localDevSwaggerUrl\n'
-        '3. Hot restart the app (R)';
+  static String _buildLocalConnectionError(String attemptedUrl) {
+    return 'Cannot reach the local HMIS API at:\n'
+        '$attemptedUrl\n\n'
+        '1. Run option 1 or 2 from run-dev.bat so the local API starts\n'
+        '2. Open $attemptedUrl/swagger/index.html\n'
+        '3. For Android USB: keep the phone connected (adb reverse)\n'
+        '4. Hot-restart the Flutter app after the API is up';
   }
 
   static Future<void> _migrateLegacyKeys(SharedPreferences prefs) async {
@@ -430,6 +527,7 @@ class ApiConfig {
   static String _environmentForUrl(String url) {
     final normalized = _normalize(url);
     if (normalized.contains(productionApiHost) ||
+        normalized == productionUsbTunnelBaseUrl ||
         normalized.endsWith(':$productionPort')) {
       return 'production';
     }
@@ -466,12 +564,20 @@ class ApiConfig {
     return false;
   }
 
-  static List<String> _localDevCandidates() {
+  static Future<List<String>> _localDevCandidates() async {
     final candidates = <String>[];
     const lanHost = String.fromEnvironment('API_LAN_HOST');
 
     if (!kIsWeb && Platform.isAndroid) {
-      candidates.add('http://10.0.2.2:$localDevPort');
+      final isPhysical = await _isPhysicalAndroidDevice();
+      if (isPhysical) {
+        candidates.add(usbTunnelBaseUrl);
+        if (lanHost.isNotEmpty) {
+          candidates.add('http://$lanHost:$localDevPort');
+        }
+      } else {
+        candidates.add('http://10.0.2.2:$localDevPort');
+      }
       candidates.add(usbTunnelBaseUrl);
       if (lanHost.isNotEmpty) {
         candidates.add('http://$lanHost:$localDevPort');
@@ -487,14 +593,15 @@ class ApiConfig {
       candidates.add(usbTunnelBaseUrl);
     }
 
-    return candidates;
+    final seen = <String>{};
+    return candidates.where((url) => seen.add(_normalize(url))).toList();
   }
 
-  static List<String> _buildCandidates({
+  static Future<List<String>> _buildCandidates({
     String? savedUrl,
     String? customUrl,
     bool includeProduction = true,
-  }) {
+  }) async {
     final ordered = <String>[];
     final seen = <String>{};
 
@@ -513,7 +620,7 @@ class ApiConfig {
 
     add(customUrl);
     add(savedUrl);
-    for (final localUrl in _localDevCandidates()) {
+    for (final localUrl in await _localDevCandidates()) {
       add(localUrl);
     }
 
@@ -523,7 +630,7 @@ class ApiConfig {
 
       if (!kIsWeb) {
         add(usbTunnelBaseUrl);
-        add('http://127.0.0.1:7078');
+        add(productionUsbTunnelBaseUrl);
       }
     }
 
@@ -558,9 +665,11 @@ class ApiConfig {
         url.contains(productionApiHost)) {
       return false;
     }
-    return url.contains('172.16.40') ||
-        url.contains('172.16.50.68') ||
-        url.contains('172.20.10.');
+    const lanHost = String.fromEnvironment('API_LAN_HOST');
+    if (lanHost.isNotEmpty && url.contains(lanHost)) {
+      return false;
+    }
+    return url.contains('172.16.50.68') || url.contains('172.20.10.');
   }
 
   static Future<bool> _probeFast(String base) async {

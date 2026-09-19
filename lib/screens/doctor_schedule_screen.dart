@@ -4,8 +4,12 @@ import 'package:btih_andriod_app/services/guest_session.dart';
 import 'package:btih_andriod_app/services/notification_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/utils/billing_departments.dart';
 import 'package:btih_andriod_app/utils/database_helper.dart';
+import 'package:btih_andriod_app/utils/doctor_image_helper.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
+import 'package:btih_andriod_app/widgets/app_app_bar.dart';
+import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -19,12 +23,10 @@ import '../services/appointment_service.dart';
 import '../services/booking_service.dart';
 
 class DoctorScheduleScreen extends StatefulWidget {
-  final int doctorId;
-  final String doctorName;
+  final Doctor doctor;
   final String patientMrNo;
   final String patientName;
   final bool? isForSelf;
-  final int departmentId;
   final bool isLoggedIn;
   final bool isRescheduleMode;
   final String? rescheduleAppointmentId;
@@ -32,11 +34,9 @@ class DoctorScheduleScreen extends StatefulWidget {
 
   const DoctorScheduleScreen({
     super.key,
-    required this.doctorId,
-    required this.doctorName,
+    required this.doctor,
     required this.patientMrNo,
     required this.patientName,
-    required this.departmentId,
     this.isForSelf,
     this.isLoggedIn = false,
     this.isRescheduleMode = false,
@@ -55,7 +55,6 @@ final AppointmentService _appointmentService = AppointmentService();
 class _DoctorScheduleScreenState extends State<DoctorScheduleScreen> {
   final DoctorService _doctorService = DoctorService();
   List<DoctorSchedule> schedules = [];
-  List<Doctor> doctors = [];
   bool isLoading = true;
   DoctorSchedule? selectedSchedule;
   late bool _isForSelf;
@@ -77,67 +76,21 @@ void dispose() {
   _relativePhoneController.dispose();
   super.dispose();
 }
-void loadData() async {
-  try {
-    final scheduleData = await _doctorService.getDoctorSchedule(widget.doctorId);
-    
-    // Instead of fetching all doctors, create a basic doctor object from passed data
-    final currentDoctor = Doctor(
-      serialNumber: 0,
-      id: widget.doctorId,
-      doctorName: widget.doctorName,
-      departmentId: widget.departmentId,
-      doctorDescription: "", // You might not have this
-      specializationName: "", // You might not have this
-      doctorImagePath: null,
-    );
-    
-    // Try to get full doctor details if possible, but use basic one as fallback
+  Future<void> loadData() async {
     try {
-      final doctorsData = await _doctorService.getDoctorsPaginated(pageNumber: 1, pageSize: 100);
-      final foundDoctor = doctorsData.data.firstWhere(
-        (d) => d.id == widget.doctorId,
-        orElse: () => currentDoctor,
-      );
-      
+      final scheduleData =
+          await _doctorService.getDoctorSchedule(widget.doctor.id);
+      if (!mounted) return;
       setState(() {
         schedules = scheduleData;
-        doctors = [foundDoctor];
         isLoading = false;
       });
     } catch (e) {
-      // Fallback to basic doctor info
-      setState(() {
-        schedules = scheduleData;
-        doctors = [currentDoctor];
-        isLoading = false;
-      });
+      debugPrint('Schedule load error: $e');
+      if (!mounted) return;
+      setState(() => isLoading = false);
     }
-  } catch (e) {
-    print("Data Load Error: $e");
-    setState(() {
-      isLoading = false;
-    });
   }
-}
-  // void loadData() async {
-  //   try {
-  //     final scheduleData = await _doctorService.getDoctorSchedule(widget.doctorId);
-  //     final doctorsData = await _doctorService.getDoctors();
-  //     final currentDoctor = doctorsData.where((d) => d.id == widget.doctorId).toList();
-
-  //     setState(() {
-  //       schedules = scheduleData;
-  //       doctors = currentDoctor;
-  //       isLoading = false;
-  //     });
-  //   } catch (e) {
-  //     print("Data Load Error: $e");
-  //     setState(() {
-  //       isLoading = false;
-  //     });
-  //   }
-  // }
 
   // Modified: Show booking type dialog only when logged in
   void _showBookingTypeDialog() {
@@ -332,7 +285,7 @@ void _showBookingConfirmationDialog(DoctorSchedule schedule) {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  _buildDetailRow('Doctor', widget.doctorName),
+                  _buildDetailRow('Doctor', widget.doctor.doctorName),
                   _buildDetailRow('Day', schedule.dayName),
                   _buildDetailRow(
                     'Time',
@@ -580,8 +533,8 @@ Future<void> _bookAppointment(
         weekId: schedule.weekId ?? 0,
         appointmentTime: formattedScheduleForDb,
         status: "Pending",
-        doctorId: widget.doctorId,
-        departmentId: widget.departmentId,
+        doctorId: widget.doctor.id,
+        departmentId: widget.doctor.departmentId,
         purpose: purpose,
         isActive: true,
       );
@@ -602,8 +555,8 @@ Future<void> _bookAppointment(
         doctorName: doctorName,
         purpose: purpose,
         createdAt: DateTime.now().toIso8601String(),
-        doctorId: widget.doctorId,
-        departmentId: widget.departmentId,
+        doctorId: widget.doctor.id,
+        departmentId: widget.doctor.departmentId,
         isGuestAppointment: true,
       );
       
@@ -679,8 +632,8 @@ Future<void> _bookAppointment(
         weekId: schedule.weekId ?? 0,
         appointmentTime: formattedScheduleForDb,
         status: "Pending",
-        doctorId: widget.doctorId,
-        departmentId: widget.departmentId,
+        doctorId: widget.doctor.id,
+        departmentId: widget.doctor.departmentId,
         purpose: purpose,
         isActive: true,
       );
@@ -742,8 +695,8 @@ Future<void> _submitRescheduleRequest({
     reason: reason,
     weekId: schedule.weekId ?? 0,
     appointmentTime: formattedScheduleForDb,
-    doctorId: widget.doctorId,
-    departmentId: widget.departmentId,
+    doctorId: widget.doctor.id,
+    departmentId: widget.doctor.departmentId,
   );
 
   Navigator.pop(dialogContext);
@@ -860,7 +813,7 @@ void _showGuestSuccessDialog(LocalAppointment appointment) {
               ),
               const SizedBox(height: 8),
               Text(
-                'Your appointment with ${widget.doctorName} has been confirmed.',
+                'Your appointment with ${widget.doctor.doctorName} has been confirmed.',
                 style: const TextStyle(
                   fontSize: 14,
                   color: Colors.grey,
@@ -925,10 +878,10 @@ void _showGuestSuccessDialog(LocalAppointment appointment) {
   }
 
   String _formatTime(DateTime time) {
-    final hour = time.hour > 12 ? time.hour - 12 : time.hour;
+    final hour = time.hour % 12 == 0 ? 12 : time.hour % 12;
     final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.hour >= 12 ? "PM" : "AM";
-    return "$hour:$minute $period";
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
   }
 
   String _formatTimeForDb(DateTime time) {
@@ -1034,20 +987,13 @@ void _showGuestSuccessDialog(LocalAppointment appointment) {
 
 @override
 Widget build(BuildContext context) {
-  final doctor = doctors.isNotEmpty ? doctors.first : null;
+  final doctor = widget.doctor;
   final groupedSchedules = groupSchedulesByDay();
   final hasSchedule = groupedSchedules.isNotEmpty;
 
   return Scaffold(
-    backgroundColor: AppColors.scaffoldBg,
-    appBar: AppBar(
-      backgroundColor: AppColors.deepRed,
-      foregroundColor: AppColors.white,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-        onPressed: () => Navigator.pop(context),
-      ),
+    backgroundColor: AppColors.white,
+    appBar: AppAppBar(
       title: Text(
         widget.isRescheduleMode ? 'Reschedule Appointment' : 'Book Appointment',
         style: AppTypography.raleway(
@@ -1057,59 +1003,29 @@ Widget build(BuildContext context) {
         ),
       ),
       centerTitle: true,
-      bottom: widget.isLoggedIn
-          ? PreferredSize(
-              preferredSize: const Size.fromHeight(42),
-              child: TapFeedback(
-                onTap: _showBookingTypeDialog,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  color: AppColors.deepRed.withValues(alpha: 0.85),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _isForSelf ? Icons.person_outline : Icons.group_outlined,
-                        color: AppColors.white,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Booking for: ${_isForSelf ? "Yourself" : "Relative"}',
-                        style: AppTypography.roboto(
-                          color: AppColors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.edit_outlined, color: AppColors.white, size: 14),
-                    ],
-                  ),
-                ),
-              ),
-            )
-          : null,
+      actions: const [
+        AppBarIconBadge(icon: Icons.calendar_month_outlined),
+      ],
     ),
-    bottomNavigationBar: !isLoading && doctor != null && hasSchedule
+    bottomNavigationBar: !isLoading && hasSchedule
         ? SafeArea(
-            minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            minimum: const EdgeInsets.fromLTRB(20, 8, 20, 14),
             child: FilledButton(
               onPressed: _onBookAppointmentPressed,
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primaryRed,
-                disabledBackgroundColor: AppColors.lightMaroon,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                backgroundColor: AppColors.deepRed,
+                disabledBackgroundColor: AppColors.deepRed,
+                padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                 ),
+                elevation: 0,
               ),
               child: Text(
                 selectedSchedule == null
                     ? 'Select a time slot to book'
                     : 'Book Appointment',
-                style: AppTypography.roboto(
+                style: AppTypography.raleway(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: AppColors.white,
@@ -1122,34 +1038,17 @@ Widget build(BuildContext context) {
         ? const Center(
             child: CircularProgressIndicator(color: AppColors.primaryRed),
           )
-        : doctor == null
-            ? Center(
-                child: Text(
-                  'Doctor details not found',
-                  style: AppTypography.roboto(color: AppColors.greyText),
-                ),
-              )
-            : SingleChildScrollView(
+        : SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
                 padding: const EdgeInsets.only(bottom: 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildDoctorHeaderCard(doctor, groupedSchedules),
-                    _buildScheduleSectionHeader(groupedSchedules),
+                    _buildDoctorHeaderCard(context, doctor, groupedSchedules),
+                    _buildScheduleSectionHeader(),
                     groupedSchedules.isEmpty
                         ? _buildEmptyState()
-                        : Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Column(
-                              children: groupedSchedules.entries.map((entry) {
-                                return _buildDayScheduleCard(
-                                  entry.key,
-                                  entry.value,
-                                );
-                              }).toList(),
-                            ),
-                          ),
+                        : _buildSchedulePanel(groupedSchedules),
                   ],
                 ),
               ),
@@ -1157,156 +1056,152 @@ Widget build(BuildContext context) {
 }
 
 Widget _buildDoctorHeaderCard(
+  BuildContext context,
   Doctor doctor,
   Map<String, List<DoctorSchedule>> groupedSchedules,
 ) {
+  final avatarSize =
+      (MediaQuery.sizeOf(context).width * 0.24).clamp(88.0, 108.0);
+
   return Container(
-    margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-    padding: const EdgeInsets.all(16),
+    margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
     decoration: BoxDecoration(
       color: AppColors.white,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: AppColors.fieldBorder),
-      boxShadow: [
-        BoxShadow(
-          color: AppColors.shadow.withValues(alpha: 0.05),
-          blurRadius: 10,
-          offset: const Offset(0, 4),
-        ),
-      ],
+      borderRadius: BorderRadius.circular(16),
     ),
     child: Column(
       children: [
+        _buildDoctorAvatar(doctor, diameter: avatarSize),
+        const SizedBox(height: 12),
+        Text(
+          doctor.doctorName,
+          textAlign: TextAlign.center,
+          style: AppTypography.montserrat(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: AppColors.darkText,
+            height: 1.25,
+          ),
+        ),
+        if (doctor.doctorDescription.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            doctor.doctorDescription,
+            textAlign: TextAlign.center,
+            style: AppTypography.roboto(
+              fontSize: 13,
+              color: AppColors.greyText,
+              height: 1.35,
+            ),
+          ),
+        ],
+        if (doctor.specializationName.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 5,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.softRed,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              doctor.specializationName,
+              textAlign: TextAlign.center,
+              style: AppTypography.roboto(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.deepRed,
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildDoctorAvatar(doctor),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    doctor.doctorName,
-                    style: AppTypography.raleway(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.darkText,
-                    ),
-                  ),
-                  if (doctor.doctorDescription.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      doctor.doctorDescription,
-                      style: AppTypography.roboto(
-                        fontSize: 12,
-                        color: AppColors.greyText,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  if (doctor.specializationName.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.softRed,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        doctor.specializationName,
-                        style: AppTypography.roboto(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.primaryRed,
-                        ),
-                      ),
-                    ),
-                ],
+            const Icon(
+              Icons.payments_outlined,
+              size: 18,
+              color: AppColors.primaryRed,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'OPD Charges',
+              style: AppTypography.roboto(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppColors.greyText,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              _getOPDChargesFromSchedules(groupedSchedules),
+              style: AppTypography.montserrat(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: AppColors.deepRed,
+                letterSpacing: -0.3,
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 14),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.fieldFill,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.fieldBorder),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.payments_outlined,
-                size: 18,
-                color: AppColors.primaryRed,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'OPD Charges: Rs. ${_getOPDChargesFromSchedules(groupedSchedules)}',
-                style: AppTypography.montserrat(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.darkText,
-                ),
-              ),
-            ],
-          ),
         ),
       ],
     ),
   );
 }
 
-Widget _buildDoctorAvatar(Doctor doctor) {
+Widget _buildDoctorAvatar(
+  Doctor doctor, {
+  required double diameter,
+}) {
+  final resolvedUrl = DoctorImageHelper.resolve(doctor.doctorImagePath);
+  final hasImage = resolvedUrl != null && resolvedUrl.isNotEmpty;
+  final fallbackIconSize = diameter * 0.42;
+
   return Container(
-    width: 72,
-    height: 72,
-    decoration: BoxDecoration(
-      color: AppColors.softRed,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: AppColors.fieldBorder),
+    width: diameter,
+    height: diameter,
+    decoration: const BoxDecoration(
+      color: AppColors.fieldFill,
+      shape: BoxShape.circle,
     ),
     clipBehavior: Clip.antiAlias,
-    child: doctor.doctorImagePath != null && doctor.doctorImagePath!.isNotEmpty
+    child: hasImage
         ? CachedNetworkImage(
-            imageUrl: doctor.doctorImagePath!,
+            imageUrl: resolvedUrl,
             fit: BoxFit.cover,
-            placeholder: (_, __) => const Center(
+            placeholder: (_, __) => Center(
               child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
+                width: diameter * 0.28,
+                height: diameter * 0.28,
+                child: const CircularProgressIndicator(
                   strokeWidth: 2,
                   color: AppColors.primaryRed,
                 ),
               ),
             ),
-            errorWidget: (_, __, ___) => const Icon(
+            errorWidget: (_, __, ___) => Icon(
               Icons.person_rounded,
-              size: 36,
-              color: AppColors.primaryRed,
+              size: fallbackIconSize,
+              color: AppColors.greyText.withValues(alpha: 0.55),
             ),
           )
-        : const Icon(
+        : Icon(
             Icons.person_rounded,
-            size: 36,
-            color: AppColors.primaryRed,
+            size: fallbackIconSize,
+            color: AppColors.greyText.withValues(alpha: 0.55),
           ),
   );
 }
 
-Widget _buildScheduleSectionHeader(
-  Map<String, List<DoctorSchedule>> groupedSchedules,
-) {
+Widget _buildScheduleSectionHeader() {
   return Padding(
-    padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+    padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
     child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           width: 40,
@@ -1318,7 +1213,7 @@ Widget _buildScheduleSectionHeader(
           child: const Icon(
             Icons.calendar_month_outlined,
             color: AppColors.primaryRed,
-            size: 22,
+            size: 20,
           ),
         ),
         const SizedBox(width: 12),
@@ -1329,11 +1224,12 @@ Widget _buildScheduleSectionHeader(
               Text(
                 'Weekly Schedule',
                 style: AppTypography.raleway(
-                  fontSize: 18,
+                  fontSize: 16,
                   fontWeight: FontWeight.w700,
                   color: AppColors.darkText,
                 ),
               ),
+              const SizedBox(height: 2),
               Text(
                 widget.isLoggedIn
                     ? 'Select a time slot, then tap Book Appointment'
@@ -1341,6 +1237,7 @@ Widget _buildScheduleSectionHeader(
                 style: AppTypography.roboto(
                   fontSize: 12,
                   color: AppColors.greyText,
+                  height: 1.35,
                 ),
               ),
             ],
@@ -1358,7 +1255,7 @@ Widget _buildScheduleSectionHeader(
               style: AppTypography.roboto(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: AppColors.primaryRed,
+                color: AppColors.deepRed,
               ),
             ),
           ),
@@ -1367,14 +1264,45 @@ Widget _buildScheduleSectionHeader(
   );
 }
 
+Widget _buildSchedulePanel(Map<String, List<DoctorSchedule>> groupedSchedules) {
+  final entries = groupedSchedules.entries.toList();
+
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+    child: Container(
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: List.generate(entries.length, (index) {
+          final entry = entries[index];
+          final isLast = index == entries.length - 1;
+          return Column(
+            children: [
+              _buildDayScheduleSection(entry.key, entry.value),
+              if (!isLast)
+                const Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: AppColors.hairline,
+                ),
+            ],
+          );
+        }),
+      ),
+    ),
+  );
+}
+
 // Helper method to get OPD charges from schedules
 String _getOPDChargesFromSchedules(Map<String, List<DoctorSchedule>> groupedSchedules) {
   for (var schedules in groupedSchedules.values) {
     if (schedules.isNotEmpty && schedules.first.opD_Charges > 0) {
-      return schedules.first.opD_Charges.toString();
+      return formatBillingCurrency(schedules.first.opD_Charges.toDouble());
     }
   }
-  return "N/A";
+  return 'N/A';
 }
   Widget _buildEmptyState() {
     return Padding(
@@ -1417,22 +1345,12 @@ String _getOPDChargesFromSchedules(Map<String, List<DoctorSchedule>> groupedSche
     );
   }
 
-  Widget _buildDayScheduleCard(String day, List<DoctorSchedule> daySchedules) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.fieldBorder),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.shadow.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
+  Widget _buildDayScheduleSection(
+    String day,
+    List<DoctorSchedule> daySchedules,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1469,7 +1387,7 @@ String _getOPDChargesFromSchedules(Map<String, List<DoctorSchedule>> groupedSche
 
               return TapFeedback(
                 onTap: () => setState(() => selectedSchedule = schedule),
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(24),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
                   padding: const EdgeInsets.symmetric(
@@ -1477,12 +1395,12 @@ String _getOPDChargesFromSchedules(Map<String, List<DoctorSchedule>> groupedSche
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: isSelected ? AppColors.primaryRed : AppColors.fieldFill,
-                    borderRadius: BorderRadius.circular(20),
+                    color: isSelected ? AppColors.deepRed : AppColors.softRed,
+                    borderRadius: BorderRadius.circular(24),
                     border: Border.all(
                       color: isSelected
-                          ? AppColors.primaryRed
-                          : AppColors.fieldBorder,
+                          ? AppColors.deepRed
+                          : AppColors.lightMaroon.withValues(alpha: 0.55),
                     ),
                   ),
                   child: Row(
@@ -1491,7 +1409,8 @@ String _getOPDChargesFromSchedules(Map<String, List<DoctorSchedule>> groupedSche
                       Icon(
                         Icons.access_time_rounded,
                         size: 14,
-                        color: isSelected ? AppColors.white : AppColors.primaryRed,
+                        color:
+                            isSelected ? AppColors.white : AppColors.primaryRed,
                       ),
                       const SizedBox(width: 6),
                       Text(
@@ -1499,7 +1418,8 @@ String _getOPDChargesFromSchedules(Map<String, List<DoctorSchedule>> groupedSche
                         style: AppTypography.roboto(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: isSelected ? AppColors.white : AppColors.darkText,
+                          color:
+                              isSelected ? AppColors.white : AppColors.darkText,
                         ),
                       ),
                       if (isSelected) ...[

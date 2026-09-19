@@ -21,7 +21,6 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final NotificationService _notificationService = NotificationService.instance;
-  NotificationFilter _selectedFilter = NotificationFilter.all;
 
   @override
   void initState() {
@@ -37,33 +36,40 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Future<void> _loadNotifications() async {
-    await _notificationService.reloadForMrNo(widget.patientMrNo);
+    final mr = widget.patientMrNo.trim().isNotEmpty
+        ? widget.patientMrNo.trim()
+        : _notificationService.lastKnownMrNo;
+    await _notificationService.reloadForMrNo(mr);
   }
 
   void _onNotificationsChanged() {
     if (mounted) setState(() {});
   }
 
-  List<AppNotification> get _visibleNotifications {
-    return _notificationService.filtered(_selectedFilter);
-  }
-
-  Map<String, List<AppNotification>> get _groupedNotifications {
-    final grouped = <String, List<AppNotification>>{};
-    for (final notification in _visibleNotifications) {
-      final label = NotificationService.groupLabelFor(notification.createdAt);
-      grouped.putIfAbsent(label, () => []).add(notification);
+  IconData _iconFor(NotificationCategory category) {
+    switch (category) {
+      case NotificationCategory.appointments:
+        return Icons.event_available_rounded;
+      case NotificationCategory.medications:
+        return Icons.medication_rounded;
+      case NotificationCategory.lab:
+        return Icons.science_outlined;
+      case NotificationCategory.records:
+        return Icons.folder_shared_outlined;
+      case NotificationCategory.billing:
+        return Icons.payments_outlined;
+      case NotificationCategory.general:
+        return Icons.campaign_outlined;
     }
-    return grouped;
   }
 
   @override
   Widget build(BuildContext context) {
-    final grouped = _groupedNotifications;
-    const groupOrder = ['Today', 'Yesterday', 'Earlier'];
+    final grouped = _notificationService.groupedByCategory();
+    final hasAny = _notificationService.notifications.isNotEmpty;
 
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       appBar: AppAppBar(
         centerTitle: true,
         title: Text(
@@ -92,117 +98,57 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           const AppBarIconBadge(icon: Icons.notifications_outlined),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildFilterBar(),
-          Expanded(
-            child: RefreshIndicator(
-              color: AppColors.primaryRed,
-              onRefresh: _loadNotifications,
-              child: _visibleNotifications.isEmpty
-                  ? ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: const [
-                        SizedBox(height: 120),
-                        _NotificationsEmptyState(),
-                      ],
-                    )
-                  : ListView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                      itemCount: _sectionCount(grouped, groupOrder),
-                      itemBuilder: (context, index) {
-                        return _buildSectionItem(grouped, groupOrder, index);
-                      },
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterBar() {
-    return Container(
-      color: AppColors.white,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: NotificationFilter.values.map((filter) {
-            final selected = _selectedFilter == filter;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TapFeedback(
-                onTap: () => setState(() => _selectedFilter = filter),
-                borderRadius: BorderRadius.circular(20),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: selected ? AppColors.primaryRed : AppColors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: selected
-                          ? AppColors.primaryRed
-                          : AppColors.fieldBorder,
-                    ),
-                  ),
-                  child: Text(
-                    filter.label,
-                    style: AppTypography.roboto(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: selected ? AppColors.white : AppColors.darkText,
-                    ),
-                  ),
-                ),
+      body: RefreshIndicator(
+        color: AppColors.primaryRed,
+        onRefresh: _loadNotifications,
+        child: !hasAny
+            ? ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  SizedBox(height: 120),
+                  _NotificationsEmptyState(),
+                ],
+              )
+            : ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 28),
+                itemCount: _flatItemCount(grouped),
+                itemBuilder: (context, index) {
+                  return _buildFlatItem(grouped, index);
+                },
               ),
-            );
-          }).toList(),
-        ),
       ),
     );
   }
 
-  int _sectionCount(
-    Map<String, List<AppNotification>> grouped,
-    List<String> groupOrder,
-  ) {
+  int _flatItemCount(Map<NotificationCategory, List<AppNotification>> grouped) {
     var count = 0;
-    for (final label in groupOrder) {
-      final items = grouped[label];
-      if (items == null || items.isEmpty) continue;
-      count += 1 + items.length;
+    for (final entry in grouped.entries) {
+      count += 1 + entry.value.length;
     }
     return count;
   }
 
-  Widget _buildSectionItem(
-    Map<String, List<AppNotification>> grouped,
-    List<String> groupOrder,
+  Widget _buildFlatItem(
+    Map<NotificationCategory, List<AppNotification>> grouped,
     int index,
   ) {
     var current = 0;
-    for (final label in groupOrder) {
-      final items = grouped[label];
-      if (items == null || items.isEmpty) continue;
-
+    for (final entry in grouped.entries) {
       if (current == index) {
-        return _SectionHeader(label: label);
+        return _CategoryHeader(
+          title: entry.key.sectionTitle,
+          icon: _iconFor(entry.key),
+          count: entry.value.length,
+        );
       }
       current++;
 
-      for (final notification in items) {
+      for (final notification in entry.value) {
         if (current == index) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _NotificationTile(
-              notification: notification,
-              onTap: () => _notificationService.markAsRead(notification.id),
-            ),
+          return _NotificationRow(
+            notification: notification,
+            onTap: () => _notificationService.markAsRead(notification.id),
           );
         }
         current++;
@@ -212,30 +158,51 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  final String label;
+class _CategoryHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final int count;
 
-  const _SectionHeader({required this.label});
+  const _CategoryHeader({
+    required this.title,
+    required this.icon,
+    required this.count,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+      child: Row(
         children: [
-          Text(
-            label,
-            style: AppTypography.raleway(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppColors.deepRed,
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: AppColors.softRed,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 17, color: AppColors.primaryRed),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: AppTypography.raleway(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.deepRed,
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          Divider(
-            height: 1,
-            color: AppColors.fieldBorder.withValues(alpha: 0.9),
+          Text(
+            '$count',
+            style: AppTypography.roboto(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.greyText,
+            ),
           ),
         ],
       ),
@@ -243,11 +210,11 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _NotificationTile extends StatelessWidget {
+class _NotificationRow extends StatelessWidget {
   final AppNotification notification;
   final VoidCallback onTap;
 
-  const _NotificationTile({
+  const _NotificationRow({
     required this.notification,
     required this.onTap,
   });
@@ -265,99 +232,95 @@ class _NotificationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TapFeedback(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: notification.isRead
-                ? AppColors.fieldBorder
-                : AppColors.lightMaroon,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.shadow.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: _dotColor(),
-                  shape: BoxShape.circle,
+    return Column(
+      children: [
+        TapFeedback(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: _dotColor(),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          notification.title,
-                          style: AppTypography.raleway(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.darkText,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              notification.title,
+                              style: AppTypography.raleway(
+                                fontSize: 15,
+                                fontWeight: notification.isRead
+                                    ? FontWeight.w600
+                                    : FontWeight.w700,
+                                color: AppColors.darkText,
+                              ),
+                            ),
                           ),
+                          if (!notification.isRead)
+                            Container(
+                              width: 8,
+                              height: 8,
+                              margin: const EdgeInsets.only(top: 6, left: 8),
+                              decoration: const BoxDecoration(
+                                color: AppColors.primaryRed,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        notification.body,
+                        style: AppTypography.roboto(
+                          fontSize: 13,
+                          color: AppColors.greyText,
+                          height: 1.4,
+                        ),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        NotificationService.formatRelativeTime(
+                          notification.createdAt,
+                        ),
+                        style: AppTypography.roboto(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.greyText.withValues(alpha: 0.9),
                         ),
                       ),
-                      if (!notification.isRead)
-                        Container(
-                          width: 8,
-                          height: 8,
-                          margin: const EdgeInsets.only(top: 6, left: 8),
-                          decoration: const BoxDecoration(
-                            color: AppColors.primaryRed,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    notification.body,
-                    style: AppTypography.roboto(
-                      fontSize: 13,
-                      color: AppColors.greyText,
-                      height: 1.4,
-                    ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    NotificationService.formatRelativeTime(
-                      notification.createdAt,
-                    ),
-                    style: AppTypography.roboto(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.greyText.withValues(alpha: 0.9),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-      ),
+        const Divider(
+          height: 1,
+          thickness: 1,
+          indent: 41,
+          endIndent: 20,
+          color: AppColors.hairline,
+        ),
+      ],
     );
   }
 }
@@ -387,7 +350,7 @@ class _NotificationsEmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Updates about appointments, lab reports, billing, and hospital announcements will appear here.',
+            'Appointment reminders, medications, lab reports, payments, and hospital updates will appear here by category.',
             textAlign: TextAlign.center,
             style: AppTypography.roboto(
               fontSize: 14,

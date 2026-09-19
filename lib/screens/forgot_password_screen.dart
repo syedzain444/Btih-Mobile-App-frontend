@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:btih_andriod_app/services/auth_exceptions.dart';
 import 'package:btih_andriod_app/services/auth_service.dart';
+import 'package:btih_andriod_app/utils/auth_field_decoration.dart';
 import 'package:btih_andriod_app/utils/auth_validation.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
@@ -14,7 +15,21 @@ import 'package:flutter/services.dart';
 import 'package:sms_autofill/sms_autofill.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
-  const ForgotPasswordScreen({super.key});
+  const ForgotPasswordScreen({
+    super.key,
+    this.initialPhone,
+    this.onCompleted,
+    this.onCancelled,
+  });
+
+  /// Optional pre-filled mobile number.
+  final String? initialPhone;
+
+  /// Called after password is updated successfully (before/instead of pop).
+  final Future<void> Function()? onCompleted;
+
+  /// Optional back/cancel when shown inside app lock.
+  final VoidCallback? onCancelled;
 
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
@@ -42,6 +57,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
   @override
   void initState() {
     super.initState();
+    final phone = widget.initialPhone?.trim();
+    if (phone != null && phone.isNotEmpty) {
+      _phoneController.text = phone;
+    }
     _listenForSmsOtp();
   }
 
@@ -253,12 +272,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
       final response = await _authService.updatePassword(
         mrno: _verifiedMrNo!,
         patientPassword: newPassword,
+        contactNo: _phoneController.text.trim(),
       );
       if (!mounted) return;
       CustomMessageDialog.showSuccess(
         context,
         response['message']?.toString() ?? 'Password updated successfully!',
-        onSuccess: () => Navigator.pop(context),
+        onSuccess: () async {
+          if (widget.onCompleted != null) {
+            await widget.onCompleted!();
+          } else if (mounted) {
+            Navigator.pop(context);
+          }
+        },
       );
     } on AuthApiException catch (e) {
       if (!mounted) return;
@@ -271,37 +297,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
     }
   }
 
-  static const _fieldFillGrey = Color(0xFFF0F0F0);
-  static const _fieldBorderGrey = Color(0xFFE0E0E0);
-
-  InputDecoration _fieldDecoration({
-    required String hint,
-    required IconData icon,
-    Widget? suffix,
-  }) {
-    return InputDecoration(
-      filled: true,
-      fillColor: _fieldFillGrey,
-      hintText: hint,
-      hintStyle: const TextStyle(color: AppColors.greyText, fontSize: 14),
-      prefixIcon: Icon(icon, color: AppColors.greyText, size: 20),
-      suffixIcon: suffix,
-      contentPadding: const EdgeInsets.symmetric(vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _fieldBorderGrey),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _fieldBorderGrey),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: AppColors.primaryRed, width: 1.5),
-      ),
-    );
-  }
-
   void _handleHeaderBack() {
     if (_step == 3) {
       setState(() => _step = 2);
@@ -312,6 +307,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
         _step = 1;
         _timer?.cancel();
       });
+      return;
+    }
+    if (widget.onCancelled != null) {
+      widget.onCancelled!();
       return;
     }
     Navigator.pop(context);
@@ -358,7 +357,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
           ),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(28, 38, 28, 28),
+              padding: const EdgeInsets.fromLTRB(28, 25, 28, 28),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -371,9 +370,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
                         fontSize: 15,
                         color: AppColors.darkText,
                       ),
-                      decoration: _fieldDecoration(
+                      decoration: authUnderlineFieldDecoration(
                         hint: 'Contact Number',
-                        icon: Icons.phone_outlined,
                       ),
                     ),
                     const SizedBox(height: 22),
@@ -402,13 +400,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
                           fontWeight: FontWeight.w600,
                           color: AppColors.darkText,
                         ),
-                        decoration: _fieldDecoration(
+                        decoration: authUnderlineFieldDecoration(
                           hint: '000000',
-                          icon: Icons.sms_outlined,
-                        ).copyWith(
                           counterText: '',
-                          helperText: '',
-                          helperMaxLines: 2,
                         ),
                       ),
                     ),
@@ -455,9 +449,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
                         fontSize: 15,
                         color: AppColors.darkText,
                       ),
-                      decoration: _fieldDecoration(
+                      decoration: authUnderlineFieldDecoration(
                         hint: 'New Password',
-                        icon: Icons.lock_outline,
                         suffix: IconButton(
                           icon: Icon(
                             _obscureNew
@@ -471,7 +464,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 20),
                     TextField(
                       controller: _confirmPasswordController,
                       obscureText: _obscureConfirm,
@@ -480,9 +473,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
                         fontSize: 15,
                         color: AppColors.darkText,
                       ),
-                      decoration: _fieldDecoration(
+                      decoration: authUnderlineFieldDecoration(
                         hint: 'Confirm Password',
-                        icon: Icons.lock_outline,
                         suffix: IconButton(
                           icon: Icon(
                             _obscureConfirm

@@ -1,15 +1,13 @@
 import 'dart:convert';
 
 import 'package:btih_andriod_app/models/local_appointment.dart';
-import 'package:btih_andriod_app/screens/doctor_schedule_screen.dart';
-import 'package:btih_andriod_app/services/appointment_service.dart';
+import 'package:btih_andriod_app/services/guest_service.dart';
 import 'package:btih_andriod_app/services/guest_session.dart';
-import 'package:btih_andriod_app/services/notification_service.dart';
+import 'package:btih_andriod_app/services/recent_activity_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
-import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:btih_andriod_app/utils/dashboard_helpers.dart';
 import 'package:btih_andriod_app/utils/database_helper.dart';
@@ -46,13 +44,32 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
   String? _error;
   int _selectedTabIndex = 0;
   bool _didOpenFocusedAppointment = false;
-  final AppointmentService _appointmentService = AppointmentService();
-  bool _actionInProgress = false;
+  final GuestService _guestService = GuestService();
+  late final PageController _pageController;
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _selectedTabIndex);
     _fetchAppointments();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _selectTab(int index) {
+    if (_selectedTabIndex == index) return;
+    setState(() => _selectedTabIndex = index);
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    }
   }
 
   Future<void> _fetchAppointments() async {
@@ -117,23 +134,32 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
       final guestPhone = GuestSession.normalizePhone(
         GuestSession.mobileNumber ?? '',
       );
-      final localAppointments = await DatabaseHelper().getGuestAppointments();
-      final filtered = localAppointments.where((item) {
-        if (guestPhone.isEmpty) return true;
-        return GuestSession.normalizePhone(item.phoneNo) == guestPhone;
-      }).toList();
+      if (guestPhone.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _allAppointments = [];
+          _splitAppointments();
+          _isLoading = false;
+          _error = null;
+        });
+        return;
+      }
 
+      final apiRows = await _guestService.fetchAppointments(guestPhone);
       if (!mounted) return;
       setState(() {
-        _allAppointments = filtered.map(_appointmentFromLocal).toList();
+        _allAppointments = apiRows
+            .map((json) => Appointment.fromJson(json))
+            .toList();
         _splitAppointments();
         _isLoading = false;
+        _error = null;
       });
       _maybeOpenFocusedAppointment();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e.toString().replaceFirst('Exception: ', '');
         _isLoading = false;
       });
     }
@@ -298,100 +324,23 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
     return status == 'pending' || status == 'confirmed';
   }
 
-  Future<String?> _promptReasonDialog({
-    required String title,
-    required String hint,
-  }) async {
-    final controller = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    final reason = await showDialog<String>(
+  Future<void> _showAdminPortalComingSoon({required bool isReschedule}) async {
+    final action = isReschedule ? 'rescheduling' : 'cancelling';
+    await showDialog<void>(
       context: context,
-      barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(
-            title,
+            'Coming Soon',
             style: AppTypography.raleway(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: AppColors.deepRed,
-            ),
-          ),
-          content: Form(
-            key: formKey,
-            child: TextFormField(
-              controller: controller,
-              maxLines: 3,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: AppTypography.roboto(
-                  fontSize: 14,
-                  color: AppColors.greyText,
-                ),
-                enabledBorder: const UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppColors.hairline),
-                ),
-                focusedBorder: const UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppColors.primaryRed, width: 2),
-                ),
-              ),
-              validator: (value) {
-                final trimmed = value?.trim() ?? '';
-                if (trimmed.isEmpty) return 'Reason is required';
-                if (trimmed.length < 5) {
-                  return 'Please enter at least 5 characters';
-                }
-                return null;
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(
-                'Back',
-                style: AppTypography.roboto(color: AppColors.greyText),
-              ),
-            ),
-            FilledButton(
-              onPressed: () {
-                if (formKey.currentState?.validate() != true) return;
-                Navigator.pop(dialogContext, controller.text.trim());
-              },
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primaryRed,
-              ),
-              child: const Text('Continue'),
-            ),
-          ],
-        );
-      },
-    );
-
-    controller.dispose();
-    return reason;
-  }
-
-  Future<bool> _confirmCancelDialog() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            'Cancel appointment?',
-            style: AppTypography.raleway(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.deepRed,
+              color: AppColors.primaryRed,
             ),
           ),
           content: Text(
-            'This will cancel your appointment immediately. This action cannot be undone.',
+            'Appointment $action feature will be available in a future update.',
             style: AppTypography.roboto(
               fontSize: 14,
               color: AppColors.greyText,
@@ -399,139 +348,35 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(
-                'Keep appointment',
-                style: AppTypography.roboto(color: AppColors.greyText),
-              ),
-            ),
             FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
+              onPressed: () => Navigator.pop(dialogContext),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primaryRed,
               ),
-              child: const Text('Yes, cancel'),
+              child: const Text('OK'),
             ),
           ],
         );
       },
     );
-    return confirmed == true;
   }
 
   Future<void> _handleCancelAppointment(
     Appointment appointment,
     BuildContext sheetContext,
   ) async {
-    if (_actionInProgress) return;
-
-    final reason = await _promptReasonDialog(
-      title: 'Cancellation reason',
-      hint: 'Tell us why you need to cancel',
-    );
-    if (reason == null || !mounted) return;
-
-    final confirmed = await _confirmCancelDialog();
-    if (!confirmed || !mounted) return;
-
-    setState(() => _actionInProgress = true);
-
-    try {
-      if (widget.isGuestMode) {
-        await DatabaseHelper().updateAppointmentStatus(
-          appointmentId: appointment.appointmentId,
-          status: 'Cancelled',
-          purposeAppend: '[CANCELLED BY PATIENT: $reason]',
-        );
-      } else {
-        if (appointment.appointmentId.isEmpty) {
-          throw Exception('Appointment ID is missing');
-        }
-        await _appointmentService.cancelAppointment(
-          appointmentId: appointment.appointmentId,
-          mrNo: widget.patientMrNo,
-          reason: reason,
-        );
-      }
-
-      if (!mounted) return;
-      Navigator.pop(sheetContext);
-
-      if (widget.patientMrNo.isNotEmpty) {
-        await NotificationService.instance.notifyAppointmentCancelled(
-          mrNo: widget.patientMrNo,
-          doctorName: appointment.doctorName,
-          appointmentTime: appointment.appointmentTime,
-        );
-      }
-
-      CustomMessageDialog.showSuccess(
-        context,
-        'Your appointment has been cancelled.',
-      );
-      await _fetchAppointments();
-    } catch (e) {
-      if (mounted) {
-        CustomMessageDialog.showError(
-          context,
-          e.toString().replaceFirst('Exception: ', ''),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _actionInProgress = false);
-    }
+    await _showAdminPortalComingSoon(isReschedule: false);
   }
 
   Future<void> _handleRescheduleAppointment(
     Appointment appointment,
     BuildContext sheetContext,
   ) async {
-    if (_actionInProgress) return;
-
-    if (appointment.doctorId <= 0) {
-      CustomMessageDialog.showError(
-        context,
-        'Doctor information is missing for this appointment. Please contact the hospital.',
-      );
-      return;
-    }
-
-    final reason = await _promptReasonDialog(
-      title: 'Reschedule reason',
-      hint: 'Tell us why you need to reschedule',
-    );
-    if (reason == null || !mounted) return;
-
-    Navigator.pop(sheetContext);
-
-    final result = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => DoctorScheduleScreen(
-          doctorId: appointment.doctorId,
-          doctorName: appointment.doctorName,
-          patientMrNo: widget.patientMrNo,
-          patientName: widget.patientName,
-          departmentId: appointment.departmentId,
-          isLoggedIn: !widget.isGuestMode,
-          isForSelf: true,
-          isRescheduleMode: true,
-          rescheduleAppointmentId: appointment.appointmentId,
-          rescheduleReason: reason,
-        ),
-      ),
-    );
-
-    if (result == true && mounted) {
-      CustomMessageDialog.showSuccess(
-        context,
-        'Reschedule request submitted. You will be notified once admin approves it.',
-      );
-      await _fetchAppointments();
-    }
+    await _showAdminPortalComingSoon(isReschedule: true);
   }
 
+  // Kept for focus helpers; lists now use explicit tab indexes.
+  // ignore: unused_element
   List<Appointment> get _visibleAppointments =>
       _selectedTabIndex == 0 ? _upcomingAppointments : _pastAppointments;
 
@@ -581,6 +426,19 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
   }
 
   void _showAppointmentDetails(Appointment appointment) {
+    final scopeId = RecentActivityService.instance.resolveScope(
+      patientMrNo: widget.patientMrNo,
+      guestPhone: GuestSession.mobileNumber ?? appointment.phoneNo,
+    );
+    RecentActivityService.instance.trackAppointment(
+      scopeId: scopeId,
+      appointmentId: appointment.appointmentId,
+      weekId: appointment.weekId,
+      appointmentTime: appointment.appointmentTime,
+      doctorName: appointment.doctorName,
+      status: appointment.status,
+    );
+
     final statusColor = _statusColor(appointment.status);
     final statusBg = _statusBackground(appointment.status);
     final department = DashboardHelpers.sanitizeLabel(appointment.purpose);
@@ -692,12 +550,10 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
                     children: [
                       Expanded(
                         child: TapFeedback(
-                          onTap: _actionInProgress
-                              ? null
-                              : () => _handleRescheduleAppointment(
-                                    appointment,
-                                    sheetContext,
-                                  ),
+                          onTap: () => _handleRescheduleAppointment(
+                            appointment,
+                            sheetContext,
+                          ),
                           borderRadius: BorderRadius.circular(12),
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -720,12 +576,10 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: TapFeedback(
-                          onTap: _actionInProgress
-                              ? null
-                              : () => _handleCancelAppointment(
-                                    appointment,
-                                    sheetContext,
-                                  ),
+                          onTap: () => _handleCancelAppointment(
+                            appointment,
+                            sheetContext,
+                          ),
                           borderRadius: BorderRadius.circular(12),
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -801,7 +655,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       appBar: AppAppBar(
         title: Text(
           'Appointments',
@@ -830,7 +684,19 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
                       child: _buildTabSwitcher(),
                     ),
                     const SizedBox(height: 16),
-                    Expanded(child: _buildTabContent()),
+                    Expanded(
+                      child: PageView(
+                        controller: _pageController,
+                        onPageChanged: (index) {
+                          if (_selectedTabIndex == index) return;
+                          setState(() => _selectedTabIndex = index);
+                        },
+                        children: [
+                          _buildTabContent(forTabIndex: 0),
+                          _buildTabContent(forTabIndex: 1),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
     );
@@ -850,12 +716,12 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
           _buildTabButton(
             label: 'Current (${_upcomingAppointments.length})',
             selected: _selectedTabIndex == 0,
-            onTap: () => setState(() => _selectedTabIndex = 0),
+            onTap: () => _selectTab(0),
           ),
           _buildTabButton(
             label: 'Past (${_pastAppointments.length})',
             selected: _selectedTabIndex == 1,
-            onTap: () => setState(() => _selectedTabIndex = 1),
+            onTap: () => _selectTab(1),
           ),
         ],
       ),
@@ -891,8 +757,12 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
     );
   }
 
-  Widget _buildTabContent() {
-    if (_visibleAppointments.isEmpty) {
+  Widget _buildTabContent({required int forTabIndex}) {
+    final appointments = forTabIndex == 0
+        ? _upcomingAppointments
+        : _pastAppointments;
+
+    if (appointments.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -900,7 +770,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                _selectedTabIndex == 0
+                forTabIndex == 0
                     ? Icons.event_available_outlined
                     : Icons.history_rounded,
                 size: 64,
@@ -908,7 +778,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
               ),
               const SizedBox(height: 16),
               Text(
-                _selectedTabIndex == 0
+                forTabIndex == 0
                     ? 'No upcoming appointments'
                     : 'No past appointments',
                 style: AppTypography.raleway(
@@ -919,7 +789,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                _selectedTabIndex == 0
+                forTabIndex == 0
                     ? 'Your active appointments will appear here.'
                     : 'Your completed appointments will appear here.',
                 textAlign: TextAlign.center,
@@ -934,10 +804,10 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
       );
     }
 
-    final sectionTitle = _selectedTabIndex == 0
-        ? 'Upcoming Appointments (${_upcomingAppointments.length})'
-        : 'Past Appointments (${_pastAppointments.length})';
-    final sectionIcon = _selectedTabIndex == 0
+    final sectionTitle = forTabIndex == 0
+        ? 'Upcoming Appointments (${appointments.length})'
+        : 'Past Appointments (${appointments.length})';
+    final sectionIcon = forTabIndex == 0
         ? Icons.calendar_month_outlined
         : Icons.history_rounded;
 
@@ -960,7 +830,7 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        ..._visibleAppointments.map(_buildAppointmentCard),
+        ...appointments.map(_buildAppointmentCard),
       ],
     );
   }

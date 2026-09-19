@@ -24,117 +24,112 @@ class _BillingAmountCardState extends State<BillingAmountCard> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
         decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.fieldBorder),
+          gradient: const LinearGradient(
+            colors: [AppColors.primaryRed, AppColors.deepRed],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: AppColors.shadow.withValues(alpha: 0.06),
-              blurRadius: 14,
+              color: AppColors.deepRed.withValues(alpha: 0.28),
+              blurRadius: 10,
               offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Available Balance',
-                        style: AppTypography.roboto(
-                          fontSize: 13,
-                          color: AppColors.greyText,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 220),
-                        child: Text(
-                          _isVisible
-                              ? formatBillingCurrency(widget.totalAmount)
-                              : 'Rs. ******',
-                          key: ValueKey(_isVisible),
-                          style: AppTypography.montserrat(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.darkText,
-                            letterSpacing: _isVisible ? -0.2 : 1.2,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Total Billing',
-                        style: AppTypography.roboto(
-                          fontSize: 13,
-                          color: AppColors.greyText,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        widget.billCount == 1
-                            ? '1 bill'
-                            : '${widget.billCount} bills',
-                        style: AppTypography.montserrat(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.darkText,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            Expanded(
+              child: _Metric(
+                label: 'Paid Total',
+                value: _isVisible
+                    ? formatBillingCurrency(widget.totalAmount)
+                    : 'Rs. *****',
+              ),
             ),
-            const SizedBox(height: 14),
+            Container(
+              width: 1,
+              height: 28,
+              color: AppColors.white.withValues(alpha: 0.28),
+            ),
+            Expanded(
+              child: _Metric(
+                label: 'Total Bills',
+                value: widget.billCount == 1
+                    ? '1 bill'
+                    : '${widget.billCount} bills',
+                alignEnd: true,
+              ),
+            ),
+            const SizedBox(width: 8),
             TapFeedback(
               onTap: () => setState(() => _isVisible = !_isVisible),
               borderRadius: BorderRadius.circular(8),
-              materialColor: AppColors.softRed,
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _isVisible
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      size: 16,
-                      color: AppColors.primaryRed,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _isVisible ? 'Hide balance' : 'View balance',
-                      style: AppTypography.raleway(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primaryRed,
-                      ),
-                    ),
-                  ],
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  _isVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 18,
+                  color: AppColors.white,
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _Metric extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool alignEnd;
+
+  const _Metric({
+    required this.label,
+    required this.value,
+    this.alignEnd = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: alignEnd ? 12 : 0,
+        right: alignEnd ? 0 : 12,
+      ),
+      child: Column(
+        crossAxisAlignment:
+            alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: AppTypography.roboto(
+              fontSize: 11,
+              color: AppColors.white.withValues(alpha: 0.82),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.montserrat(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppColors.white,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,9 +1,11 @@
 import 'package:btih_andriod_app/models/doctors_model.dart';
 import 'package:btih_andriod_app/models/specialization_model.dart';
 import 'package:btih_andriod_app/services/doctors_service.dart';
+import 'package:btih_andriod_app/services/recent_activity_service.dart';
 import 'package:btih_andriod_app/services/specialization_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/utils/doctor_image_helper.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
@@ -11,10 +13,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'doctor_schedule_screen.dart';
-
-enum DoctorSortOrder { nameAsc, nameDesc, specialtyAsc }
-
-enum DoctorAvailabilityFilter { all }
 
 class DoctorsListScreen extends StatefulWidget {
   final String patientMrNo;
@@ -38,32 +36,27 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
-  List<Specialization> specializations = [];
   List<Doctor> allDoctors = [];
   List<Doctor> filteredDoctors = [];
-
-  String? selectedSpecialization;
-  DoctorSortOrder _sortOrder = DoctorSortOrder.nameAsc;
-  DoctorAvailabilityFilter _availabilityFilter =
-      DoctorAvailabilityFilter.all;
+  List<Specialization> specializations = [];
 
   bool isLoading = true;
-  bool isLoadingMore = false;
+  bool isPageLoading = false;
   String searchQuery = '';
+  String? selectedSpecialization;
 
   int currentPage = 1;
   int totalRecords = 0;
   int totalPages = 1;
-  bool hasMorePages = true;
 
   static const int _pageSize = 10;
-  static const int _popularSpecialtyCount = 6;
+  bool get _hasActiveFilter =>
+      searchQuery.isNotEmpty || selectedSpecialization != null;
 
   @override
   void initState() {
     super.initState();
     loadInitialData();
-    _scrollController.addListener(_onScroll);
   }
 
   @override
@@ -73,33 +66,16 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
     super.dispose();
   }
 
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
-      loadMoreDoctors();
-    }
-  }
-
-  List<Specialization> get _popularSpecialties {
-    if (specializations.length <= _popularSpecialtyCount) {
-      return specializations;
-    }
-    return specializations.take(_popularSpecialtyCount).toList();
-  }
-
   Future<void> loadInitialData() async {
     setState(() => isLoading = true);
 
     List<Specialization> loadedSpecializations = [];
     DoctorResponse? doctorResponse;
     Object? doctorsError;
-    Object? specializationError;
 
     try {
       loadedSpecializations = await _specializationService.getSpecializations();
-    } catch (e) {
-      specializationError = e;
-    }
+    } catch (_) {}
 
     try {
       doctorResponse = await _doctorService.getDoctorsPaginated(
@@ -118,61 +94,28 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
         _applyDoctorResponse(doctorResponse!, reset: true);
         isLoading = false;
       });
-      if (specializationError != null && specializations.isEmpty) {
-        _showErrorSnackBar(
-          'Specialty filters unavailable right now. Showing all doctors.',
-        );
+      _precacheDoctorImages(doctorResponse.data);
+    } else {
+      setState(() => isLoading = false);
+      var message = doctorsError.toString().replaceFirst('Exception: ', '');
+      if (message.isEmpty) {
+        message = 'Failed to load doctors. Please try again.';
       }
-      return;
-    }
-
-    setState(() => isLoading = false);
-    _showErrorSnackBar(
-      doctorsError?.toString().replaceFirst('Exception: ', '') ??
-          'Failed to load doctors. Please try again.',
-    );
-  }
-
-  Future<void> loadMoreDoctors() async {
-    if (isLoadingMore || !hasMorePages) return;
-
-    setState(() => isLoadingMore = true);
-
-    try {
-      final doctorResponse = await _doctorService.getDoctorsPaginated(
-        pageNumber: currentPage + 1,
-        pageSize: _pageSize,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        allDoctors.addAll(doctorResponse.data);
-        currentPage = doctorResponse.pagination.pageNumber;
-        totalPages = doctorResponse.pagination.totalPages;
-        totalRecords = doctorResponse.pagination.totalRecords;
-        hasMorePages = currentPage < totalPages;
-        isLoadingMore = false;
-        _applyFiltersAndSort();
-      });
-      _maybeLoadMoreForActiveFilter();
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => isLoadingMore = false);
-      _showErrorSnackBar('Failed to load more doctors.');
+      _showErrorSnackBar(message);
     }
   }
 
-  Future<void> refreshDoctors() async {
+  Future<void> _fetchPage(int page, {bool showFullLoader = false}) async {
+    if (isPageLoading) return;
+
     setState(() {
-      currentPage = 1;
-      hasMorePages = true;
-      isLoading = true;
+      isPageLoading = true;
+      if (showFullLoader) isLoading = true;
     });
 
     try {
       final doctorResponse = await _doctorService.getDoctorsPaginated(
-        pageNumber: 1,
+        pageNumber: page,
         pageSize: _pageSize,
       );
 
@@ -180,13 +123,36 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
 
       setState(() {
         _applyDoctorResponse(doctorResponse, reset: true);
+        isPageLoading = false;
         isLoading = false;
       });
+      _precacheDoctorImages(doctorResponse.data);
+      _scrollController.jumpTo(0);
     } catch (_) {
       if (!mounted) return;
-      setState(() => isLoading = false);
-      _showErrorSnackBar('Failed to refresh doctors.');
+      setState(() {
+        isPageLoading = false;
+        isLoading = false;
+      });
+      _showErrorSnackBar('Failed to load doctors.');
     }
+  }
+
+  Future<void> _goToPage(int page) async {
+    if (page < 1 || page > totalPages || page == currentPage) return;
+    await _fetchPage(page);
+  }
+
+  Future<void> refreshDoctors() async {
+    await _fetchPage(1, showFullLoader: true);
+  }
+
+  void _precacheDoctorImages(Iterable<Doctor> doctors) {
+    DoctorImageHelper.precacheAvatars(
+      context,
+      doctors.map((doctor) => doctor.doctorImagePath),
+      maxUrls: _pageSize,
+    );
   }
 
   void _applyDoctorResponse(DoctorResponse response, {required bool reset}) {
@@ -198,65 +164,142 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
     currentPage = response.pagination.pageNumber;
     totalPages = response.pagination.totalPages;
     totalRecords = response.pagination.totalRecords;
-    hasMorePages = currentPage < totalPages;
-    _applyFiltersAndSort();
+    _applySearchFilter();
   }
 
-  void _applyFiltersAndSort() {
-    var results = allDoctors.where((doctor) {
-      if (selectedSpecialization != null &&
-          selectedSpecialization!.isNotEmpty &&
-          doctor.specializationName != selectedSpecialization) {
-        return false;
-      }
+  void _applySearchFilter() {
+    var results = List<Doctor>.from(allDoctors);
 
-      if (searchQuery.isNotEmpty) {
-        final query = searchQuery.toLowerCase();
+    if (selectedSpecialization != null && selectedSpecialization!.isNotEmpty) {
+      results = results
+          .where((doctor) => doctor.specializationName == selectedSpecialization)
+          .toList();
+    }
+
+    if (searchQuery.isNotEmpty) {
+      final query = searchQuery.toLowerCase();
+      results = results.where((doctor) {
         return doctor.doctorName.toLowerCase().contains(query) ||
             doctor.specializationName.toLowerCase().contains(query) ||
             doctor.doctorDescription.toLowerCase().contains(query);
-      }
+      }).toList();
+    }
 
-      return true;
-    }).toList();
-
-    switch (_sortOrder) {
-      case DoctorSortOrder.nameAsc:
-        results.sort((a, b) => a.doctorName.compareTo(b.doctorName));
-      case DoctorSortOrder.nameDesc:
-        results.sort((a, b) => b.doctorName.compareTo(a.doctorName));
-      case DoctorSortOrder.specialtyAsc:
-        results.sort(
-          (a, b) => a.specializationName.compareTo(b.specializationName),
-        );
+    final hasActiveFilter =
+        searchQuery.isNotEmpty || selectedSpecialization != null;
+    if (hasActiveFilter) {
+      results.sort((a, b) => a.doctorName.compareTo(b.doctorName));
+    } else {
+      results.sort((a, b) => a.serialNumber.compareTo(b.serialNumber));
     }
 
     filteredDoctors = results;
   }
 
-  void _maybeLoadMoreForActiveFilter() {
-    if (!hasMorePages || isLoadingMore) return;
-    final hasActiveFilter =
-        selectedSpecialization != null || searchQuery.isNotEmpty;
-    if (hasActiveFilter && filteredDoctors.length < 8) {
-      loadMoreDoctors();
+  Future<void> _maybeLoadMoreForFilter() async {
+    if (!_hasActiveFilter || isPageLoading) return;
+    if (currentPage >= totalPages) return;
+    if (filteredDoctors.length >= 8) return;
+
+    setState(() => isPageLoading = true);
+
+    try {
+      final doctorResponse = await _doctorService.getDoctorsPaginated(
+        pageNumber: currentPage + 1,
+        pageSize: _pageSize,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _applyDoctorResponse(doctorResponse, reset: false);
+        isPageLoading = false;
+      });
+      _precacheDoctorImages(doctorResponse.data);
+      _maybeLoadMoreForFilter();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => isPageLoading = false);
     }
   }
 
-  void _selectSpecialization(String? specializationName) {
+  void _onSearchChanged(String query) {
+    final trimmed = query.trim();
+    final wasFiltering = _hasActiveFilter;
+
     setState(() {
-      selectedSpecialization = specializationName;
-      _applyFiltersAndSort();
+      searchQuery = trimmed;
+      _applySearchFilter();
     });
-    _maybeLoadMoreForActiveFilter();
+
+    if (wasFiltering && !_hasActiveFilter) {
+      _fetchPage(1);
+    } else if (!wasFiltering && _hasActiveFilter) {
+      _loadAllForFilter();
+    } else {
+      _maybeLoadMoreForFilter();
+    }
   }
 
-  void _onSearchChanged(String query) {
+  void _selectSpecialization(String? specialization) {
+    final wasFiltering = _hasActiveFilter;
+
     setState(() {
-      searchQuery = query.trim();
-      _applyFiltersAndSort();
+      selectedSpecialization = specialization;
+      _applySearchFilter();
     });
-    _maybeLoadMoreForActiveFilter();
+
+    if (wasFiltering && !_hasActiveFilter) {
+      _fetchPage(1);
+    } else if (!wasFiltering && _hasActiveFilter) {
+      _loadAllForFilter();
+    } else {
+      _maybeLoadMoreForFilter();
+    }
+  }
+
+  Future<void> _loadAllForFilter() async {
+    while (mounted && _hasActiveFilter && currentPage < totalPages) {
+      if (isPageLoading) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
+      await _maybeLoadMoreForFilter();
+    }
+  }
+
+  List<Specialization> get _sortedSpecializations {
+    final items = List<Specialization>.from(specializations)
+      ..sort(
+        (a, b) => a.specializationName.compareTo(b.specializationName),
+      );
+    return items;
+  }
+
+  Future<void> _openAllSpecialtiesSheet() async {
+    if (specializations.isEmpty) {
+      _showErrorSnackBar('Specialties are not available right now.');
+      return;
+    }
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return _AllSpecialtiesSheet(
+          specializations: _sortedSpecializations,
+          selectedSpecialization: selectedSpecialization,
+        );
+      },
+    );
+
+    if (!mounted || selected == null) return;
+    // Empty string means user cleared the current specialty.
+    _selectSpecialization(selected.isEmpty ? null : selected);
   }
 
   void _clearSearch() {
@@ -265,15 +308,24 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
   }
 
   void _openDoctorSchedule(Doctor doctor) {
+    final scopeId = RecentActivityService.instance.resolveScope(
+      patientMrNo: widget.patientMrNo,
+    );
+    RecentActivityService.instance.trackDoctor(
+      scopeId: scopeId,
+      doctorId: doctor.id,
+      doctorName: doctor.doctorName,
+      departmentId: doctor.departmentId,
+      specializationName: doctor.specializationName,
+    );
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => DoctorScheduleScreen(
-          doctorId: doctor.id,
-          doctorName: doctor.doctorName,
+          doctor: doctor,
           patientMrNo: widget.patientMrNo,
           patientName: widget.patientName,
-          departmentId: doctor.departmentId,
           isLoggedIn: widget.isLoggedIn,
         ),
       ),
@@ -290,394 +342,10 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
     );
   }
 
-  Future<void> _openAllSpecialtiesSheet() async {
-    final queryController = TextEditingController();
-    var sheetQuery = '';
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final items = specializations.where((item) {
-              if (sheetQuery.isEmpty) return true;
-              return item.specializationName
-                  .toLowerCase()
-                  .contains(sheetQuery.toLowerCase());
-            }).toList();
-
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-              ),
-              child: SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(height: 10),
-                    Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppColors.fieldBorder,
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'All Specialties',
-                              style: AppTypography.raleway(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.darkText,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () => Navigator.pop(context),
-                            icon: const Icon(Icons.close_rounded),
-                            color: AppColors.greyText,
-                          ),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: TextField(
-                        controller: queryController,
-                        onChanged: (value) {
-                          setSheetState(() => sheetQuery = value.trim());
-                        },
-                        decoration: InputDecoration(
-                          hintText: 'Search specialties...',
-                          prefixIcon: const Icon(
-                            Icons.search_rounded,
-                            color: AppColors.primaryRed,
-                          ),
-                          filled: true,
-                          fillColor: AppColors.fieldFill,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                        itemCount: items.length + 1,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: AppColors.fieldBorder),
-                        itemBuilder: (context, index) {
-                          if (index == 0) {
-                            final selected = selectedSpecialization == null;
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: Icon(
-                                Icons.grid_view_rounded,
-                                color: selected
-                                    ? AppColors.primaryRed
-                                    : AppColors.greyText,
-                              ),
-                              title: Text(
-                                'All Specialties',
-                                style: AppTypography.roboto(
-                                  fontWeight: selected
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  color: selected
-                                      ? AppColors.primaryRed
-                                      : AppColors.darkText,
-                                ),
-                              ),
-                              trailing: selected
-                                  ? const Icon(
-                                      Icons.check_rounded,
-                                      color: AppColors.primaryRed,
-                                    )
-                                  : null,
-                              onTap: () {
-                                _selectSpecialization(null);
-                                Navigator.pop(context);
-                              },
-                            );
-                          }
-
-                          final item = items[index - 1];
-                          final selected =
-                              selectedSpecialization == item.specializationName;
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(
-                              Icons.medical_services_outlined,
-                              color: selected
-                                  ? AppColors.primaryRed
-                                  : AppColors.greyText,
-                              size: 22,
-                            ),
-                            title: Text(
-                              item.specializationName,
-                              style: AppTypography.roboto(
-                                fontWeight: selected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: selected
-                                    ? AppColors.primaryRed
-                                    : AppColors.darkText,
-                              ),
-                            ),
-                            trailing: selected
-                                ? const Icon(
-                                    Icons.check_rounded,
-                                    color: AppColors.primaryRed,
-                                  )
-                                : null,
-                            onTap: () {
-                              _selectSpecialization(item.specializationName);
-                              Navigator.pop(context);
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    queryController.dispose();
-  }
-
-  Future<void> _openFilterSheet() async {
-    String? tempSpecialty = selectedSpecialization;
-    var tempSort = _sortOrder;
-    var tempAvailability = _availabilityFilter;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Filter & Sort',
-                      style: AppTypography.raleway(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.darkText,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Specialty',
-                      style: AppTypography.roboto(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.greyText,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String?>(
-                      value: tempSpecialty,
-                      decoration: _sheetFieldDecoration(),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('All Specialties'),
-                        ),
-                        ...specializations.map(
-                          (item) => DropdownMenuItem<String?>(
-                            value: item.specializationName,
-                            child: Text(
-                              item.specializationName,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        setSheetState(() => tempSpecialty = value);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Availability',
-                      style: AppTypography.roboto(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.greyText,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Slot details appear on the doctor profile.',
-                      style: AppTypography.roboto(
-                        fontSize: 12,
-                        color: AppColors.greyText,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<DoctorAvailabilityFilter>(
-                      value: tempAvailability,
-                      decoration: _sheetFieldDecoration(),
-                      items: const [
-                        DropdownMenuItem(
-                          value: DoctorAvailabilityFilter.all,
-                          child: Text('All Doctors'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setSheetState(() => tempAvailability = value);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Sort',
-                      style: AppTypography.roboto(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.greyText,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<DoctorSortOrder>(
-                      value: tempSort,
-                      decoration: _sheetFieldDecoration(),
-                      items: const [
-                        DropdownMenuItem(
-                          value: DoctorSortOrder.nameAsc,
-                          child: Text('Name (A–Z)'),
-                        ),
-                        DropdownMenuItem(
-                          value: DoctorSortOrder.nameDesc,
-                          child: Text('Name (Z–A)'),
-                        ),
-                        DropdownMenuItem(
-                          value: DoctorSortOrder.specialtyAsc,
-                          child: Text('Specialty (A–Z)'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setSheetState(() => tempSort = value);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () {
-                              setSheetState(() {
-                                tempSpecialty = null;
-                                tempSort = DoctorSortOrder.nameAsc;
-                                tempAvailability = DoctorAvailabilityFilter.all;
-                              });
-                            },
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.primaryRed,
-                              side: const BorderSide(color: AppColors.fieldBorder),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text('Reset'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () {
-                              setState(() {
-                                selectedSpecialization = tempSpecialty;
-                                _sortOrder = tempSort;
-                                _availabilityFilter = tempAvailability;
-                                _applyFiltersAndSort();
-                              });
-                              Navigator.pop(context);
-                              _maybeLoadMoreForActiveFilter();
-                            },
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.primaryRed,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text('Apply'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  InputDecoration _sheetFieldDecoration() {
-    return InputDecoration(
-      filled: true,
-      fillColor: AppColors.fieldFill,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.fieldBorder),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.fieldBorder),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    );
-  }
-
-  bool get _hasActiveFilters =>
-      selectedSpecialization != null ||
-      _sortOrder != DoctorSortOrder.nameAsc ||
-      searchQuery.isNotEmpty;
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       appBar: AppAppBar(
         title: Text(
           'Find a Doctor',
@@ -699,25 +367,25 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildSearchSection(),
-                _buildPopularSpecialties(),
-                _buildFilterRow(),
-                _buildResultsHeader(),
+                _buildSearchAndFiltersSection(),
                 Expanded(child: _buildDoctorList()),
               ],
             ),
     );
   }
 
-  Widget _buildSearchSection() {
+  Widget _buildSearchAndFiltersSection() {
     return Container(
       color: AppColors.white,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-      child: TextField(
-        controller: _searchController,
-        onChanged: _onSearchChanged,
-        decoration: InputDecoration(
-          hintText: 'Search doctor name or specialization...',
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _searchController,
+            onChanged: _onSearchChanged,
+            decoration: InputDecoration(
+              hintText: 'Search doctor name, specialization...',
           hintStyle: AppTypography.roboto(
             color: AppColors.greyText,
             fontSize: 14,
@@ -730,7 +398,7 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
                 )
               : null,
           filled: true,
-          fillColor: AppColors.fieldFill,
+          fillColor: AppColors.white,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: BorderSide.none,
@@ -743,170 +411,162 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: AppColors.primaryRed, width: 1.5),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          ),
+          if (specializations.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildSpecializationTab(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecializationTab() {
+    final label = selectedSpecialization?.trim().isNotEmpty == true
+        ? selectedSpecialization!.trim()
+        : 'Specialization';
+
+    return TapFeedback(
+      onTap: _openAllSpecialtiesSheet,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: AppColors.blush,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppColors.primaryRed.withValues(alpha: 0.12),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.tune_rounded,
+              size: 20,
+              color: AppColors.primaryRed,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.raleway(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primaryRed,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 22,
+              color: AppColors.primaryRed,
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildPopularSpecialties() {
-    if (specializations.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      color: AppColors.white,
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Popular Specialties',
-                    style: AppTypography.raleway(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.darkText,
-                    ),
-                  ),
-                ),
-                TapFeedback(
-                  onTap: _openAllSpecialtiesSheet,
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    child: Text(
-                      'View All',
-                      style: AppTypography.roboto(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primaryRed,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 42,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _popularSpecialties.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final item = _popularSpecialties[index];
-                final selected =
-                    selectedSpecialization == item.specializationName;
-                return TapFeedback(
-                  onTap: () => _selectSpecialization(
-                    selected ? null : item.specializationName,
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: selected ? AppColors.primaryRed : AppColors.softRed,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: selected
-                            ? AppColors.primaryRed
-                            : AppColors.fieldBorder,
-                      ),
-                    ),
-                    child: Text(
-                      item.specializationName,
-                      style: AppTypography.roboto(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: selected ? AppColors.white : AppColors.primaryRed,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
+  double _paginationReserveHeight(BuildContext context) {
+    if (_hasActiveFilter || totalPages <= 1) return 16;
+    return 88 + MediaQuery.paddingOf(context).bottom;
   }
 
-  Widget _buildFilterRow() {
+  Widget _buildPaginationBar() {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Row(
-        children: [
-          _FilterChipButton(
-            label: selectedSpecialization ?? 'Specialty',
-            icon: Icons.medical_information_outlined,
-            active: selectedSpecialization != null,
-            onTap: _openAllSpecialtiesSheet,
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 12 + bottomInset),
+      child: Material(
+        color: AppColors.white,
+        elevation: 10,
+        shadowColor: AppColors.shadow.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: AppColors.fieldBorder.withValues(alpha: 0.9),
+            ),
           ),
-          const SizedBox(width: 8),
-          _FilterChipButton(
-            label: 'Filter',
-            icon: Icons.tune_rounded,
-            active: _hasActiveFilters,
-            onTap: _openFilterSheet,
+          child: Row(
+            children: [
+              _PaginationTextButton(
+                label: 'Previous',
+                icon: Icons.chevron_left_rounded,
+                iconFirst: true,
+                enabled: currentPage > 1 && !isPageLoading,
+                onTap: () => _goToPage(currentPage - 1),
+              ),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: _visiblePageNumbers().map((page) {
+                    final isActive = page == currentPage;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: TapFeedback(
+                        onTap: isPageLoading || isActive
+                            ? null
+                            : () => _goToPage(page),
+                        borderRadius: BorderRadius.circular(999),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: isActive
+                                ? AppColors.primaryRed
+                                : AppColors.softRed,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            '$page',
+                            style: AppTypography.roboto(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isActive
+                                  ? AppColors.white
+                                  : AppColors.primaryRed,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              _PaginationTextButton(
+                label: 'Next',
+                icon: Icons.chevron_right_rounded,
+                enabled: currentPage < totalPages && !isPageLoading,
+                onTap: () => _goToPage(currentPage + 1),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          _FilterChipButton(
-            label: _sortLabel(_sortOrder),
-            icon: Icons.sort_rounded,
-            active: _sortOrder != DoctorSortOrder.nameAsc,
-            onTap: _openFilterSheet,
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  String _sortLabel(DoctorSortOrder order) {
-    switch (order) {
-      case DoctorSortOrder.nameAsc:
-        return 'Sort';
-      case DoctorSortOrder.nameDesc:
-        return 'Z–A';
-      case DoctorSortOrder.specialtyAsc:
-        return 'Specialty';
+  List<int> _visiblePageNumbers() {
+    if (totalPages <= 5) {
+      return List.generate(totalPages, (index) => index + 1);
     }
-  }
 
-  Widget _buildResultsHeader() {
-    final loadedLabel = totalRecords > 0
-        ? '${filteredDoctors.length} shown · $totalRecords total'
-        : '${filteredDoctors.length} doctors';
+    var start = currentPage - 2;
+    if (start < 1) start = 1;
+    if (start + 4 > totalPages) start = totalPages - 4;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              loadedLabel,
-              style: AppTypography.roboto(
-                fontSize: 12,
-                color: AppColors.greyText,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          if (hasMorePages && !isLoadingMore)
-            Text(
-              'Page $currentPage of $totalPages',
-              style: AppTypography.roboto(
-                fontSize: 11,
-                color: AppColors.greyText,
-              ),
-            ),
-        ],
-      ),
-    );
+    return List.generate(5, (index) => start + index);
   }
 
   Widget _buildDoctorList() {
@@ -940,176 +600,193 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                hasMorePages
-                    ? 'Try another specialty or scroll to load more doctors.'
-                    : 'Try adjusting your search or filters.',
+                _hasActiveFilter
+                    ? 'Try another search or specialty.'
+                    : 'No doctors on this page.',
                 textAlign: TextAlign.center,
                 style: AppTypography.roboto(
                   fontSize: 13,
                   color: AppColors.greyText,
                 ),
               ),
-              if (hasMorePages) ...[
-                const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: loadMoreDoctors,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primaryRed,
-                    side: const BorderSide(color: AppColors.primaryRed),
-                  ),
-                  child: const Text('Load more doctors'),
-                ),
-              ],
             ],
           ),
         ),
       );
     }
 
-    return RefreshIndicator(
-      color: AppColors.primaryRed,
-      onRefresh: refreshDoctors,
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        itemCount: filteredDoctors.length + (isLoadingMore ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index == filteredDoctors.length && isLoadingMore) {
-            return const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: CircularProgressIndicator(
-                  color: AppColors.primaryRed,
-                  strokeWidth: 2,
-                ),
-              ),
-            );
-          }
-          return _DoctorCard(
-            doctor: filteredDoctors[index],
-            onBookAppointment: () => _openDoctorSchedule(filteredDoctors[index]),
-          );
-        },
-      ),
+    final showPagination = !_hasActiveFilter && totalPages > 1;
+    final bottomReserve = _paginationReserveHeight(context);
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        RefreshIndicator(
+          color: AppColors.primaryRed,
+          onRefresh: refreshDoctors,
+          child: ListView.separated(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
+            ),
+            padding: EdgeInsets.fromLTRB(16, 4, 16, bottomReserve),
+            itemCount: filteredDoctors.length,
+            separatorBuilder: (_, __) => const Divider(
+              height: 1,
+              thickness: 1,
+              color: AppColors.hairline,
+            ),
+            itemBuilder: (context, index) {
+              final doctor = filteredDoctors[index];
+              return _DoctorListRow(
+                doctor: doctor,
+                index: index,
+                onTap: () => _openDoctorSchedule(doctor),
+              );
+            },
+          ),
+        ),
+        if (isPageLoading)
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(
+              minHeight: 2,
+              color: AppColors.primaryRed,
+              backgroundColor: AppColors.softRed,
+            ),
+          ),
+        if (showPagination)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _buildPaginationBar(),
+          ),
+      ],
     );
   }
 }
 
-class _FilterChipButton extends StatelessWidget {
+class _PaginationTextButton extends StatelessWidget {
   final String label;
   final IconData icon;
-  final bool active;
+  final bool iconFirst;
+  final bool enabled;
   final VoidCallback onTap;
 
-  const _FilterChipButton({
+  const _PaginationTextButton({
     required this.label,
     required this.icon,
-    required this.active,
+    this.iconFirst = false,
+    required this.enabled,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: TapFeedback(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          decoration: BoxDecoration(
-            color: active ? AppColors.softRed : AppColors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: active ? AppColors.primaryRed : AppColors.fieldBorder,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: active ? AppColors.primaryRed : AppColors.greyText,
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.roboto(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: active ? AppColors.primaryRed : AppColors.darkText,
+    final color = enabled ? AppColors.primaryRed : AppColors.greyText;
+
+    return TapFeedback(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: iconFirst
+              ? [
+                  Icon(icon, size: 18, color: color),
+                  const SizedBox(width: 2),
+                  Text(
+                    label,
+                    style: AppTypography.roboto(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
                   ),
-                ),
-              ),
-            ],
-          ),
+                ]
+              : [
+                  Text(
+                    label,
+                    style: AppTypography.roboto(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(icon, size: 18, color: color),
+                ],
         ),
       ),
     );
   }
 }
 
-class _DoctorCard extends StatelessWidget {
+class _DoctorListRow extends StatelessWidget {
   final Doctor doctor;
-  final VoidCallback onBookAppointment;
+  final int index;
+  final VoidCallback onTap;
 
-  const _DoctorCard({
+  const _DoctorListRow({
     required this.doctor,
-    required this.onBookAppointment,
+    required this.index,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final qualification = doctor.doctorDescription.trim();
+    final specialty = doctor.specializationName.trim();
+    final accent =
+        AppColors.activityPalette[index % AppColors.activityPalette.length];
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.fieldBorder),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.shadow.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _DoctorAvatar(imageUrl: doctor.doctorImagePath),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      doctor.doctorName,
-                      style: AppTypography.raleway(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.darkText,
-                      ),
+    return TapFeedback(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _DoctorAvatar(
+              imageUrl: doctor.doctorImagePath,
+              accent: accent,
+              size: 52,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    doctor.doctorName,
+                    style: AppTypography.raleway(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.darkText,
+                      height: 1.25,
                     ),
-                    if (qualification.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        qualification,
-                        style: AppTypography.roboto(
-                          fontSize: 12,
-                          color: AppColors.greyText,
-                        ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (qualification.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      qualification,
+                      style: AppTypography.roboto(
+                        fontSize: 12,
+                        color: AppColors.greyText,
+                        height: 1.35,
                       ),
-                    ],
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (specialty.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -1118,45 +795,39 @@ class _DoctorCard extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: AppColors.softRed,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
-                        doctor.specializationName,
+                        specialty,
                         style: AppTypography.roboto(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           color: AppColors.primaryRed,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: onBookAppointment,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primaryRed,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: Text(
-                'Book Appointment',
-                style: AppTypography.roboto(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.white,
-                ),
+                ],
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: const BoxDecoration(
+                color: AppColors.softRed,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.arrow_forward_rounded,
+                size: 18,
+                color: AppColors.primaryRed.withValues(alpha: 0.85),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1164,42 +835,269 @@ class _DoctorCard extends StatelessWidget {
 
 class _DoctorAvatar extends StatelessWidget {
   final String? imageUrl;
+  final ({Color icon, Color background}) accent;
+  final double size;
 
-  const _DoctorAvatar({this.imageUrl});
+  const _DoctorAvatar({
+    required this.imageUrl,
+    required this.accent,
+    this.size = 36,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final resolvedUrl = DoctorImageHelper.resolve(imageUrl);
+    final hasImage = resolvedUrl != null && resolvedUrl.isNotEmpty;
+    final iconSize = size * 0.5;
+
     return Container(
-      width: 52,
-      height: 52,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        color: AppColors.softRed,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.fieldBorder),
+        color: accent.background,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: AppColors.primaryRed.withValues(alpha: 0.18), // fixed theme color, no longer tied to accent
+          width: 1.2,
+        ),
       ),
       clipBehavior: Clip.antiAlias,
-      child: imageUrl != null && imageUrl!.isNotEmpty
+      child: hasImage
           ? CachedNetworkImage(
-              imageUrl: imageUrl!,
-              fit: BoxFit.cover,
-              placeholder: (_, __) => const Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-              errorWidget: (_, __, ___) => const Icon(
-                Icons.person_rounded,
-                color: AppColors.primaryRed,
-                size: 28,
-              ),
-            )
-          : const Icon(
-              Icons.person_rounded,
-              color: AppColors.primaryRed,
-              size: 28,
+        imageUrl: resolvedUrl,
+        fit: BoxFit.cover,
+        memCacheWidth: DoctorImageHelper.avatarCachePx,
+        memCacheHeight: DoctorImageHelper.avatarCachePx,
+        maxWidthDiskCache: DoctorImageHelper.avatarCachePx,
+        maxHeightDiskCache: DoctorImageHelper.avatarCachePx,
+        fadeInDuration: const Duration(milliseconds: 150),
+        fadeOutDuration: Duration.zero,
+        placeholder: (_, __) => Center(
+          child: SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: accent.icon,
             ),
+          ),
+        ),
+        errorWidget: (_, __, ___) => Icon(
+          Icons.person_rounded,
+          size: iconSize,
+          color: accent.icon,
+        ),
+      )
+          : Icon(
+        Icons.person_rounded,
+        size: iconSize,
+        color: accent.icon,
+      ),
+    );
+  }
+}
+
+class _AllSpecialtiesSheet extends StatefulWidget {
+  final List<Specialization> specializations;
+  final String? selectedSpecialization;
+
+  const _AllSpecialtiesSheet({
+    required this.specializations,
+    required this.selectedSpecialization,
+  });
+
+  @override
+  State<_AllSpecialtiesSheet> createState() => _AllSpecialtiesSheetState();
+}
+
+class _AllSpecialtiesSheetState extends State<_AllSpecialtiesSheet> {
+  late final TextEditingController _searchController;
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _closeWithResult(String? value) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    // Let the keyboard dismiss before the sheet route is torn down.
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return;
+    Navigator.pop(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sheetHeight = MediaQuery.sizeOf(context).height * 0.72;
+    final query = _query.trim().toLowerCase();
+    final items = widget.specializations.where((item) {
+      if (query.isEmpty) return true;
+      return item.specializationName.toLowerCase().contains(query);
+    }).toList();
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        await _closeWithResult(null);
+      },
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SizedBox(
+          height: sheetHeight,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.fieldBorder,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'All Specialties',
+                    style: AppTypography.raleway(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.darkText,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _searchController,
+                    onChanged: (value) => setState(() => _query = value),
+                    decoration: InputDecoration(
+                      hintText: 'Search specialty...',
+                      hintStyle: AppTypography.roboto(
+                        color: AppColors.greyText,
+                        fontSize: 14,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: AppColors.greyText.withValues(alpha: 0.95),
+                      ),
+                      filled: true,
+                      fillColor: AppColors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFBDB4B2),
+                          width: 1.4,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFBDB4B2),
+                          width: 1.4,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: AppColors.primaryRed,
+                          width: 1.6,
+                        ),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: items.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No specialties match your search.',
+                              textAlign: TextAlign.center,
+                              style: AppTypography.roboto(
+                                fontSize: 14,
+                                color: AppColors.greyText,
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: items.length,
+                            separatorBuilder: (_, _) => const Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: AppColors.hairline,
+                            ),
+                            itemBuilder: (context, index) {
+                              final item = items[index];
+                              final selected =
+                                  widget.selectedSpecialization ==
+                                      item.specializationName;
+
+                              return TapFeedback(
+                                onTap: () {
+                                  _closeWithResult(
+                                    selected
+                                        ? ''
+                                        : item.specializationName,
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(10),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          item.specializationName,
+                                          style: AppTypography.roboto(
+                                            fontSize: 15,
+                                            fontWeight: selected
+                                                ? FontWeight.w600
+                                                : FontWeight.w500,
+                                            color: selected
+                                                ? AppColors.primaryRed
+                                                : AppColors.darkText,
+                                          ),
+                                        ),
+                                      ),
+                                      if (selected)
+                                        const Icon(
+                                          Icons.check_circle_rounded,
+                                          size: 18,
+                                          color: AppColors.primaryRed,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

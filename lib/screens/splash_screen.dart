@@ -12,12 +12,12 @@ class _HospitalLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final scale = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween(begin: 1.0, end: 1.06)
+        tween: Tween(begin: 1.0, end: 1.02)
             .chain(CurveTween(curve: Curves.easeOut)),
         weight: 50,
       ),
       TweenSequenceItem(
-        tween: Tween(begin: 1.06, end: 1.0)
+        tween: Tween(begin: 1.02, end: 1.0)
             .chain(CurveTween(curve: Curves.easeIn)),
         weight: 50,
       ),
@@ -30,9 +30,9 @@ class _HospitalLogo extends StatelessWidget {
         child: child,
       ),
       child: Image.asset(
-        'assets/images/hospital_logo.png',
-        width: 118,
-        height: 118,
+        'assets/images/logo.png',
+        width: 200,
+        height: 200,
         fit: BoxFit.contain,
       ),
     );
@@ -125,7 +125,7 @@ class _SplashScreenState extends State<SplashScreen>
         child: FadeTransition(
           opacity: _logoAnim,
           child: ScaleTransition(
-            scale: Tween(begin: 0.7, end: 1.0).animate(_logoAnim),
+            scale: Tween(begin: 0.88, end: 1.0).animate(_logoAnim),
             child: _HospitalLogo(pulse: _pulseController),
           ),
         ),

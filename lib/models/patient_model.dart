@@ -10,6 +10,7 @@ class PatientProfileData {
   final String contactNo;
   final String bloodGroup;
   final String emailAddress;
+  final String? profileImageUrl;
 
   PatientProfileData({
     required this.mrNo,
@@ -21,6 +22,7 @@ class PatientProfileData {
     required this.contactNo,
     required this.bloodGroup,
     required this.emailAddress,
+    this.profileImageUrl,
   });
 
   factory PatientProfileData.fromJson(Map<String, dynamic> json) {
@@ -37,6 +39,8 @@ class PatientProfileData {
       contactNo: json['contactNo']?.toString() ?? '',
       bloodGroup: json['bloodGroup']?.toString() ?? '',
       emailAddress: json['emailAddress']?.toString() ?? '',
+      profileImageUrl: json['profileImageUrl']?.toString() ??
+          json['ProfileImageUrl']?.toString(),
     );
   }
 }
@@ -112,7 +116,9 @@ class PatientVisit {
       admissionNo: json['admissionNo']?.toString(),
       disease: json['disease']?.toString(),
       presentingComplaints: json['presentingComplaints']?.toString(),
-      isDischarged: json['isDischarged'] == true,
+      isDischarged: json['isDischarged'] == true ||
+          json['isDischarged']?.toString() == '1' ||
+          json['isDischarged']?.toString().toLowerCase() == 'true',
       dischargeId: json['dischargeId'] is int
           ? json['dischargeId'] as int
           : int.tryParse(json['dischargeId']?.toString() ?? ''),
@@ -140,6 +146,16 @@ class PatientVisit {
     if (department.isNotEmpty) return department;
     return 'General';
   }
+
+  /// OPD visits are excluded from patient visit history in the app.
+  bool get isOpdVisit {
+    final raw = department.trim().toUpperCase();
+    if (raw.isEmpty) return false;
+    return raw == 'OPD' ||
+        raw.contains('OPD') ||
+        raw.contains('OUT PATIENT') ||
+        raw.contains('OUTPATIENT');
+  }
 }
 
 class PatientApiResponse {
@@ -151,29 +167,59 @@ class PatientApiResponse {
     required this.visitHistory,
   });
 
+  /// OPD visits are never surfaced in the app's patient history.
+  static List<PatientVisit> _withoutOpd(List<PatientVisit> visits) =>
+      visits.where((v) => !v.isOpdVisit).toList();
+
+  static List<PatientVisit> _parseVisitList(dynamic visitsJson) {
+    if (visitsJson is List) {
+      return visitsJson
+          .whereType<Map>()
+          .map((e) => PatientVisit.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    // Paged shape from API: { pageNumber, pageSize, totalRecords, data: [...] }
+    if (visitsJson is Map) {
+      final map = Map<String, dynamic>.from(visitsJson);
+      final data = map['data'] ?? map['Data'] ?? map['items'] ?? map['Items'];
+      if (data is List) {
+        return data
+            .whereType<Map>()
+            .map((e) => PatientVisit.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+    }
+    return const <PatientVisit>[];
+  }
+
   static PatientApiResponse fromDynamic(dynamic body) {
-    if (body is Map<String, dynamic>) {
-      if (body.containsKey('visitHistory') || body.containsKey('profile')) {
-        final profileJson = body['profile'];
-        final visitsJson = body['visitHistory'];
+    if (body is Map) {
+      final map = Map<String, dynamic>.from(body);
+      if (map.containsKey('visitHistory') || map.containsKey('profile')) {
+        final profileJson = map['profile'];
+        final visits = _parseVisitList(map['visitHistory']);
 
         return PatientApiResponse(
-          profile: profileJson is Map<String, dynamic>
-              ? PatientProfileData.fromJson(profileJson)
+          profile: profileJson is Map
+              ? PatientProfileData.fromJson(
+                  Map<String, dynamic>.from(profileJson),
+                )
               : null,
-          visitHistory: visitsJson is List
-              ? visitsJson
-                  .map((e) => PatientVisit.fromJson(e as Map<String, dynamic>))
-                  .toList()
-              : [],
+          visitHistory: _withoutOpd(visits),
         );
       }
     }
 
     if (body is List && body.isNotEmpty) {
-      final visits = body
-          .map((e) => PatientVisit.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final visits = _withoutOpd(
+        body
+            .whereType<Map>()
+            .map((e) => PatientVisit.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+      );
+      if (visits.isEmpty) {
+        return PatientApiResponse(profile: null, visitHistory: []);
+      }
       final first = visits.first;
       return PatientApiResponse(
         profile: PatientProfileData(
@@ -204,6 +250,7 @@ class PatientInfo {
   final String contactNo;
   final String bloodGroup;
   final String email;
+  final String? profileImageUrl;
 
   PatientInfo({
     required this.firstName,
@@ -214,6 +261,7 @@ class PatientInfo {
     required this.contactNo,
     required this.bloodGroup,
     required this.email,
+    this.profileImageUrl,
   });
 
   factory PatientInfo.fromProfile(PatientProfileData profile) {
@@ -226,6 +274,7 @@ class PatientInfo {
       contactNo: profile.contactNo,
       bloodGroup: profile.bloodGroup,
       email: profile.emailAddress,
+      profileImageUrl: profile.profileImageUrl,
     );
   }
 

@@ -1,11 +1,17 @@
 class DashboardHelpers {
   DashboardHelpers._();
 
+  /// Greeting by Pakistan Standard Time (UTC+5, no DST).
+  /// Morning 5:00–11:59 · Afternoon 12:00–16:59 · Evening 17:00–20:59 · Night 21:00–4:59
   static String timeBasedGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good Morning,';
-    if (hour < 17) return 'Good Afternoon,';
-    return 'Good Evening,';
+    final pakistanNow =
+        DateTime.now().toUtc().add(const Duration(hours: 5));
+    final hour = pakistanNow.hour;
+
+    if (hour >= 5 && hour < 12) return 'Good Morning,';
+    if (hour >= 12 && hour < 17) return 'Good Afternoon,';
+    if (hour >= 17 && hour < 21) return 'Good Evening,';
+    return 'Good Night,';
   }
 
   static String formatDisplayName(String name) {

@@ -1,25 +1,13 @@
-import 'dart:convert';
-import 'package:btih_andriod_app/utils/ip_file.dart';
-import 'package:http/http.dart' as http;
-import '../models/patient_report_model.dart';
+import 'package:btih_andriod_app/models/patient_report_model.dart';
+import 'package:btih_andriod_app/services/billing_service.dart';
 
 class PatientReportService {
+  final BillingService _billingService = BillingService();
 
   Future<List<PatientReport>> getPatientReportHistory(String mrNo) async {
     try {
-      final response = await ApiConfig.client.get(
-        Uri.parse("${ApiConfig.baseUrl}/api/PatientReport/history/$mrNo"),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        return data.map((json) => PatientReport.fromJson(json)).toList();
-      } else {
-        throw Exception('Failed to load patient report history');
-      }
+      final history = await _billingService.getHistory(mrNo);
+      return history.items;
     } catch (e) {
       print('Error loading patient report history: $e');
       rethrow;

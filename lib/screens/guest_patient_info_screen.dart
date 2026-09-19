@@ -1,6 +1,7 @@
 import 'package:btih_andriod_app/screens/login_screen.dart';
 import 'package:btih_andriod_app/services/auth_exceptions.dart';
 import 'package:btih_andriod_app/services/auth_service.dart';
+import 'package:btih_andriod_app/services/guest_service.dart';
 import 'package:btih_andriod_app/services/guest_session.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
@@ -20,6 +21,7 @@ class _GuestPatientInfoScreenState extends State<GuestPatientInfoScreen> {
   final _nameController = TextEditingController();
   final _mobileController = TextEditingController();
   final _authService = AuthService();
+  final _guestService = GuestService();
 
   DateTime? _dateOfBirth;
   String? _gender;
@@ -156,12 +158,26 @@ class _GuestPatientInfoScreenState extends State<GuestPatientInfoScreen> {
       _dateOfBirth!.day,
     );
 
-    await GuestSession.save(
-      fullName: _nameController.text.trim(),
-      mobileNumber: mobile,
-      dateOfBirth: dob.toIso8601String(),
-      gender: _gender!,
-    );
+    try {
+      final apiResponse = await _guestService.saveProfile(
+        fullName: _nameController.text.trim(),
+        mobileNumber: mobile,
+        dateOfBirth: dob,
+        gender: _gender!,
+      );
+      await GuestSession.saveFromApiResponse(apiResponse);
+    } on GuestProfileConflictException {
+      if (!mounted) return;
+      await _showRegisteredAccountDialog();
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      CustomMessageDialog.showError(
+        context,
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+      return;
+    }
 
     if (!mounted) return;
     Navigator.pop(context, true);

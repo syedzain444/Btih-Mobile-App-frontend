@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:btih_andriod_app/theme/app_colors.dart';
@@ -10,7 +9,6 @@ import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
 class BillingPdfService {
@@ -75,8 +73,8 @@ class BillingPdfService {
     }
 
     final dio = ApiConfig.createDio();
-    dio.options.connectTimeout = const Duration(seconds: 30);
-    dio.options.receiveTimeout = const Duration(seconds: 30);
+    dio.options.connectTimeout = const Duration(seconds: 8);
+    dio.options.receiveTimeout = const Duration(seconds: 12);
 
     final urls = <String>[
       _generateReportsUrl(rptId: rptId, billId: billId),
@@ -199,44 +197,11 @@ class BillingPdfService {
 
       if (!context.mounted) return;
 
-      if (kIsWeb) {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => Scaffold(
-              appBar: AppBar(
-                title: Text(
-                  title,
-                  style: AppTypography.raleway(
-                    fontSize: 16,
-                    color: AppColors.white,
-                  ),
-                ),
-                backgroundColor: AppColors.deepRed,
-                foregroundColor: AppColors.white,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ),
-              body: SfPdfViewer.memory(Uint8List.fromList(bytes)),
-            ),
-          ),
-        );
-        return;
-      }
-
-      final dir = await getApplicationDocumentsDirectory();
-      final fileName =
-          'Bill_${billId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      final filePath = '${dir.path}/$fileName';
-      await File(filePath).writeAsBytes(bytes, flush: true);
-
-      if (!context.mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => Scaffold(
+            backgroundColor: AppColors.white,
             appBar: AppBar(
               title: Text(
                 title,
@@ -252,7 +217,10 @@ class BillingPdfService {
                 onPressed: () => Navigator.pop(context),
               ),
             ),
-            body: SfPdfViewer.file(File(filePath)),
+            body: ColoredBox(
+              color: AppColors.white,
+              child: SfPdfViewer.memory(Uint8List.fromList(bytes)),
+            ),
           ),
         ),
       );

@@ -1,28 +1,47 @@
 import 'dart:convert';
 
+import 'package:btih_andriod_app/models/doctors_model.dart';
+import 'package:btih_andriod_app/models/patient_report_model.dart';
+import 'package:btih_andriod_app/models/recent_activity_item.dart';
 import 'package:btih_andriod_app/screens/AppointmentsInfoScreen.dart';
+import 'package:btih_andriod_app/screens/discharge_history_screen.dart';
+import 'package:btih_andriod_app/screens/doctor_schedule_screen.dart';
 import 'package:btih_andriod_app/screens/login_screen.dart';
 import 'package:btih_andriod_app/screens/notifications_screen.dart';
 import 'package:btih_andriod_app/screens/guest_patient_info_screen.dart';
+import 'package:btih_andriod_app/models/current_medication_model.dart';
 import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:btih_andriod_app/services/guest_session.dart';
+import 'package:btih_andriod_app/services/medication_service.dart';
 import 'package:btih_andriod_app/services/notification_service.dart';
+import 'package:btih_andriod_app/services/recent_activity_service.dart';
 import 'package:btih_andriod_app/screens/welcome_screen.dart';
 import 'package:btih_andriod_app/screens/medication_reminders_screen.dart';
+import 'package:btih_andriod_app/screens/messaging/message_inbox_screen.dart';
 import 'package:btih_andriod_app/screens/patient_profile_screen.dart';
+import 'package:btih_andriod_app/screens/settings/help_support_screen.dart';
+import 'package:btih_andriod_app/screens/settings/notification_preferences_screen.dart';
+import 'package:btih_andriod_app/screens/settings/security_settings_screen.dart';
+import 'package:btih_andriod_app/screens/settings/settings_static_screen.dart';
 import 'package:btih_andriod_app/screens/patient_records_screen.dart';
 import 'package:btih_andriod_app/screens/patient_report_history_screen.dart';
 import 'package:btih_andriod_app/screens/reports_screen.dart';
+import 'package:btih_andriod_app/screens/visit_history_screen.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
+import 'package:btih_andriod_app/widgets/billing/invoice_details_modal.dart';
+import 'package:btih_andriod_app/widgets/guest_profile_required_dialog.dart';
+import 'package:btih_andriod_app/widgets/patient_avatar.dart';
 import 'package:btih_andriod_app/widgets/patient_bottom_nav_bar.dart';
+import 'package:btih_andriod_app/services/profile_photo_service.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/utils/billing_departments.dart';
 import 'package:btih_andriod_app/utils/dashboard_helpers.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
-import '../models/patient_model.dart';
 import 'doctors_list_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -67,35 +86,11 @@ class _UpcomingAppointment {
   });
 }
 
-class _RecentActivityItem {
-  final String title;
-  final String subtitle;
-  final String timestamp;
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBackground;
-  final DateTime sortDate;
-  final String statusLabel;
-  final bool isNew;
-
-  const _RecentActivityItem({
-    required this.title,
-    required this.subtitle,
-    required this.timestamp,
-    required this.icon,
-    required this.iconColor,
-    required this.iconBackground,
-    required this.sortDate,
-    this.statusLabel = 'Done',
-    this.isNew = false,
-  });
-}
-
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   static const _summaryNavIndex = 2;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  static const _emergencyNumber = 'tel:115';
+  static const _emergencyPhoneDigits = '02137187111';
 
   bool _isLoggedIn = false;
   late String _patientDisplayName;
@@ -105,8 +100,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   int _prescriptionsCount = 0;
   int _medicationsCount = 0;
-  List<_RecentActivityItem> _recentActivity = [];
+  List<RecentActivityItem> _recentActivity = [];
   bool _loadingOverview = false;
+  final _medicationService = MedicationService();
 
   late AnimationController _entranceController;
   late Animation<double> _greetingAnim;
@@ -126,9 +122,11 @@ class _DashboardScreenState extends State<DashboardScreen>
     _scrollController.addListener(_onDashboardScroll);
     _loadUpcomingAppointment();
     _loadHealthOverview();
+    _loadRecentActivity();
     NotificationService.instance.addListener(_onNotificationsChanged);
     if (_isLoggedIn && widget.patientMrNo.isNotEmpty) {
       NotificationService.instance.reloadForMrNo(widget.patientMrNo);
+      _syncProfilePhoto();
     }
 
     _entranceController = AnimationController(
@@ -254,163 +252,33 @@ class _DashboardScreenState extends State<DashboardScreen>
     setState(() => _loadingOverview = true);
     try {
       final mrNo = widget.patientMrNo;
-      final responses = await Future.wait([
-        ApiConfig.client.get(Uri.parse('${ApiConfig.baseUrl}/api/Patient/$mrNo/labReports')),
-        ApiConfig.client.get(Uri.parse('${ApiConfig.baseUrl}/api/Patient/$mrNo/gastroReports')),
-        ApiConfig.client.get(Uri.parse('${ApiConfig.baseUrl}/api/Patient/$mrNo/radiologyReports')),
-        ApiConfig.client.get(Uri.parse('${ApiConfig.baseUrl}/api/Patient/$mrNo/prescriptionReports')),
-        ApiConfig.client.get(Uri.parse('${ApiConfig.baseUrl}/api/Patient?MR_NO=$mrNo')),
+      final overviewResponses = Future.wait([
         ApiConfig.client.get(
-          Uri.parse('${ApiConfig.baseUrl}/api/Medications/current/$mrNo'),
+          Uri.parse('${ApiConfig.baseUrl}/api/Patient/$mrNo/prescriptionReports'),
         ),
       ]);
+      final medicationsFuture = _medicationService
+          .getCurrentMedications(mrNo)
+          .catchError((_) => <CurrentMedication>[]);
+
+      final parallelResults = await Future.wait([
+        overviewResponses,
+        medicationsFuture,
+      ]);
+      final responses = parallelResults[0] as List<http.Response>;
+      final medications = parallelResults[1] as List<CurrentMedication>;
 
       if (!mounted) return;
 
       int prescriptionsCount = 0;
-      final activities = <_RecentActivityItem>[];
-
-      void addReportActivities(List<dynamic> data, String typeLabel) {
-        for (final item in data) {
-          if (item is! Map<String, dynamic>) continue;
-          final name = item['diagnostiC_NAME']?.toString() ?? 'Report';
-          final dateRaw = item['dT_SAMPLECOLLECTION']?.toString() ?? '';
-          DateTime? dt;
-          try {
-            if (dateRaw.isNotEmpty) dt = DateTime.parse(dateRaw);
-          } catch (_) {}
-
-          if (dt != null) {
-            activities.add(
-              _RecentActivityItem(
-                title: '$typeLabel report available',
-                subtitle: '$name is ready',
-                timestamp: DashboardHelpers.formatActivityTimestamp(dt),
-                icon: Icons.description_outlined,
-                iconColor: AppColors.primaryRed,
-                iconBackground: AppColors.softRed,
-                sortDate: dt,
-                statusLabel: 'New',
-                isNew: true,
-              ),
-            );
-          }
-        }
-      }
-
       if (responses[0].statusCode == 200) {
-        addReportActivities(jsonDecode(responses[0].body) as List<dynamic>, 'Lab');
-      }
-      if (responses[1].statusCode == 200) {
-        addReportActivities(jsonDecode(responses[1].body) as List<dynamic>, 'Gastro');
-      }
-      if (responses[2].statusCode == 200) {
-        addReportActivities(
-          jsonDecode(responses[2].body) as List<dynamic>,
-          'Radiology',
-        );
-      }
-
-      if (responses[3].statusCode == 200) {
-        final data = jsonDecode(responses[3].body) as List<dynamic>;
-        for (final item in data) {
-          if (item is! Map<String, dynamic>) continue;
-          prescriptionsCount++;
-          final name = item['diagnostiC_NAME']?.toString() ?? 'Prescription';
-          final dateRaw = item['dT_SAMPLECOLLECTION']?.toString() ?? '';
-          DateTime? dt;
-          try {
-            if (dateRaw.isNotEmpty) dt = DateTime.parse(dateRaw);
-          } catch (_) {}
-
-          if (dt != null) {
-            activities.add(
-              _RecentActivityItem(
-                title: 'Prescription updated',
-                subtitle: 'New prescription added — $name',
-                timestamp: DashboardHelpers.formatActivityTimestamp(dt),
-                icon: Icons.medication_outlined,
-                iconColor: AppColors.deepRed,
-                iconBackground: AppColors.blush,
-                sortDate: dt,
-                statusLabel: 'New',
-                isNew: true,
-              ),
-            );
-          }
-        }
-      }
-
-      if (responses[4].statusCode == 200) {
-        final parsed =
-            PatientApiResponse.fromDynamic(jsonDecode(responses[4].body));
-        for (final visit in parsed.visitHistory.take(5)) {
-          final doctor = DashboardHelpers.normalizeDoctorName(
-            visit.displayDoctor,
-          );
-          final dateRaw = visit.visitDate;
-          DateTime? dt;
-          try {
-            if (dateRaw.isNotEmpty) dt = DateTime.parse(dateRaw);
-          } catch (_) {}
-
-          if (dt != null) {
-            activities.add(
-              _RecentActivityItem(
-                title: 'Visit completed',
-                subtitle: doctor,
-                timestamp: DashboardHelpers.formatActivityTimestamp(dt),
-                icon: Icons.medical_services_outlined,
-                iconColor: AppColors.primaryRed,
-                iconBackground: AppColors.softRed,
-                sortDate: dt,
-              ),
-            );
-          }
-        }
-      }
-
-      activities.sort((a, b) => b.sortDate.compareTo(a.sortDate));
-
-      final recent = activities.take(3).toList();
-      final coloredRecent = <_RecentActivityItem>[];
-      for (var i = 0; i < recent.length; i++) {
-        final item = recent[i];
-        if (item.title == 'Visit completed') {
-          final accent = AppColors.activityPalette[i % AppColors.activityPalette.length];
-          coloredRecent.add(
-            _RecentActivityItem(
-              title: item.title,
-              subtitle: item.subtitle,
-              timestamp: item.timestamp,
-              icon: Icons.medical_services_outlined,
-              iconColor: accent.icon,
-              iconBackground: accent.background,
-              sortDate: item.sortDate,
-              statusLabel: item.statusLabel,
-              isNew: item.isNew,
-            ),
-          );
-        } else {
-          coloredRecent.add(item);
-        }
-      }
-
-      var medicationsCount = 0;
-      if (responses.length > 5 && responses[5].statusCode == 200) {
-        try {
-          final medsBody = jsonDecode(responses[5].body);
-          if (medsBody is Map<String, dynamic>) {
-            final data = medsBody['data'];
-            if (data is List) medicationsCount = data.length;
-          }
-        } catch (_) {}
+        final data = jsonDecode(responses[0].body);
+        if (data is List) prescriptionsCount = data.length;
       }
 
       setState(() {
         _prescriptionsCount = prescriptionsCount;
-        _medicationsCount = medicationsCount;
-        _recentActivity = coloredRecent;
+        _medicationsCount = medications.length;
       });
     } catch (_) {
       // Keep dashboard usable if overview fetch fails.
@@ -422,8 +290,133 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Future<bool> _ensureGuestProfile() async {
-    if (GuestSession.isComplete) return true;
+  String get _activityScopeId => RecentActivityService.instance.resolveScope(
+        patientMrNo: _isLoggedIn ? widget.patientMrNo : '',
+        guestPhone: GuestSession.mobileNumber,
+      );
+
+  Future<void> _loadRecentActivity() async {
+    final items = await RecentActivityService.instance.getActivities(
+      _activityScopeId,
+    );
+    if (!mounted) return;
+    setState(() => _recentActivity = items);
+  }
+
+  Future<void> _openRecentActivity(RecentActivityItem item) async {
+    switch (item.kind) {
+      case RecentActivityKind.doctor:
+        final doctorId = item.payload['doctorId'] as int? ??
+            int.tryParse(item.payload['doctorId']?.toString() ?? '') ??
+            0;
+        if (doctorId <= 0) return;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DoctorScheduleScreen(
+              doctor: Doctor.minimal(
+                id: doctorId,
+                doctorName: item.payload['doctorName']?.toString() ?? item.subtitle,
+                departmentId: item.payload['departmentId'] as int? ??
+                    int.tryParse(
+                          item.payload['departmentId']?.toString() ?? '',
+                        ) ??
+                        0,
+                specializationName:
+                    item.payload['specializationName']?.toString() ?? '',
+              ),
+              patientMrNo: widget.patientMrNo,
+              patientName: widget.patientName,
+              isLoggedIn: _isLoggedIn,
+            ),
+          ),
+        );
+      case RecentActivityKind.appointment:
+        await _openAppointments(
+          focusAppointmentId: item.payload['appointmentId']?.toString(),
+          focusWeekId: item.payload['weekId'] as int? ??
+              int.tryParse(item.payload['weekId']?.toString() ?? ''),
+          focusAppointmentTime: item.payload['appointmentTime']?.toString(),
+        );
+      case RecentActivityKind.medicalReport:
+        if (!await _checkLoginAndNavigate('reports') || !mounted) return;
+        final categoryIndex = item.payload['categoryIndex'] as int? ??
+            int.tryParse(item.payload['categoryIndex']?.toString() ?? '') ??
+            0;
+        final reportRaw = item.payload['report'];
+        final report = reportRaw is Map
+            ? Map<String, dynamic>.from(reportRaw)
+            : null;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ReportsScreen(
+              patientMrNo: widget.patientMrNo,
+              patientName: widget.patientName,
+              initialTabIndex: categoryIndex.clamp(0, 3),
+              autoOpenReport: report,
+            ),
+          ),
+        );
+      case RecentActivityKind.discharge:
+        if (!await _checkLoginAndNavigate('discharge history') || !mounted) {
+          return;
+        }
+        final recordRaw = item.payload['record'];
+        final record = recordRaw is Map
+            ? Map<String, dynamic>.from(recordRaw)
+            : null;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DischargeHistoryScreen(
+              patientMrNo: widget.patientMrNo,
+              autoOpenRecord: record,
+            ),
+          ),
+        );
+      case RecentActivityKind.visit:
+        if (!await _checkLoginAndNavigate('visit history') || !mounted) {
+          return;
+        }
+        final visitId = item.payload['patientVisitId'] as int? ??
+            int.tryParse(item.payload['patientVisitId']?.toString() ?? '');
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => VisitHistoryScreen(
+              patientMrNo: widget.patientMrNo,
+              patientName: widget.patientName,
+              focusVisitId: visitId,
+            ),
+          ),
+        );
+      case RecentActivityKind.bill:
+        if (!await _checkLoginAndNavigate('billing') || !mounted) return;
+        final reportRaw = item.payload['report'];
+        if (reportRaw is! Map) return;
+        final report =
+            PatientReport.fromJson(Map<String, dynamic>.from(reportRaw));
+        final rptId = item.payload['rptId'] as int? ??
+            int.tryParse(item.payload['rptId']?.toString() ?? '') ??
+            BillingDepartments.byCode(
+                  item.payload['departmentCode']?.toString() ?? '',
+                )?.rptId ??
+            report.reportId ??
+            0;
+        await showInvoiceDetailsModal(
+          context: context,
+          patientMrNo: widget.patientMrNo,
+          report: report,
+          rptId: rptId,
+        );
+    }
+
+    if (mounted) await _loadRecentActivity();
+  }
+
+  Future<bool> _ensureGuestProfileForDoctors() async {
+    if (_isLoggedIn || GuestSession.isComplete) return true;
     if (!mounted) return false;
 
     final completed = await Navigator.push<bool>(
@@ -431,11 +424,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       MaterialPageRoute(builder: (_) => const GuestPatientInfoScreen()),
     );
     return completed == true && GuestSession.isComplete;
-  }
-
-  Future<bool> _ensureGuestAccess() async {
-    if (_isLoggedIn) return true;
-    return _ensureGuestProfile();
   }
 
   Future<bool> _checkLoginAndNavigate(String destination) async {
@@ -504,12 +492,18 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _openNotifications() async {
-    if (!await _checkLoginAndNavigate('notifications') || !mounted) return;
+    final mrNo = widget.patientMrNo.trim().isNotEmpty
+        ? widget.patientMrNo.trim()
+        : NotificationService.instance.lastKnownMrNo;
+    if (mrNo.isEmpty) {
+      if (!await _checkLoginAndNavigate('notifications') || !mounted) return;
+    }
+    if (!mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => NotificationsScreen(
-          patientMrNo: widget.patientMrNo,
+          patientMrNo: mrNo.isNotEmpty ? mrNo : widget.patientMrNo,
         ),
       ),
     );
@@ -520,8 +514,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   void _goToDoctorsList() async {
-    if (!await _ensureGuestAccess() || !mounted) return;
-    Navigator.push(
+    if (!_isLoggedIn && !await _ensureGuestProfileForDoctors()) return;
+    if (!mounted) return;
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => DoctorsListScreen(
@@ -533,6 +528,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       ),
     );
+    if (mounted) await _loadRecentActivity();
   }
 
   Future<void> _openAppointments({
@@ -540,8 +536,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     int? focusWeekId,
     String? focusAppointmentTime,
   }) async {
-    if (!await _ensureGuestAccess() || !mounted) return;
-    Navigator.push(
+    if (!_isLoggedIn && !GuestSession.isComplete) {
+      if (!mounted) return;
+      final action = await showGuestProfileRequiredDialog(context);
+      if (action == GuestProfileRequiredAction.goToDoctors) {
+        _goToDoctorsList();
+      }
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => AppointmentsInfoScreen(
@@ -556,6 +560,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       ),
     );
+    if (mounted) await _loadRecentActivity();
   }
 
   Future<void> _openUpcomingAppointmentDetails() async {
@@ -572,7 +577,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _openRecords() async {
     if (!await _checkLoginAndNavigate('records') || !mounted) return;
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PatientRecordsScreen(
@@ -581,11 +586,12 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       ),
     );
+    if (mounted) await _loadRecentActivity();
   }
 
   Future<void> _openBilling() async {
     if (!await _checkLoginAndNavigate('billing') || !mounted) return;
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PatientReportHistoryScreen(
@@ -595,6 +601,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       ),
     );
+    if (mounted) await _loadRecentActivity();
   }
 
   Future<void> _openMedicationReminders() async {
@@ -622,7 +629,15 @@ class _DashboardScreenState extends State<DashboardScreen>
         : 'Patient';
   }
 
+  Future<void> _syncProfilePhoto() async {
+    try {
+      await ProfilePhotoService().syncFromPatientApi(widget.patientMrNo);
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
   Future<void> _openProfile() async {
+    _closeProfileDrawer();
     if (!await _checkLoginAndNavigate('profile') || !mounted) return;
     await Navigator.push(
       context,
@@ -639,9 +654,73 @@ class _DashboardScreenState extends State<DashboardScreen>
     widget.onPatientNameChanged?.call(updatedName);
   }
 
+  Future<void> _openNotificationPreferences() async {
+    _closeProfileDrawer();
+    if (!await _checkLoginAndNavigate('notification preferences') || !mounted) {
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NotificationPreferencesScreen(
+          patientMrNo: widget.patientMrNo,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPrivacyPolicy() async {
+    _closeProfileDrawer();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SettingsStaticScreen(
+          page: SettingsStaticPage.privacyPolicy,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openHelpSupport() async {
+    _closeProfileDrawer();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const HelpSupportScreen(),
+      ),
+    );
+  }
+
+  Future<void> _openMessages() async {
+    _closeProfileDrawer();
+    if (!await _checkLoginAndNavigate('messages') || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MessageInboxScreen(
+          patientMrNo: widget.patientMrNo,
+          patientName: _displayName,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSecuritySettings() async {
+    _closeProfileDrawer();
+    if (!await _checkLoginAndNavigate('security settings') || !mounted) {
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SecuritySettingsScreen(),
+      ),
+    );
+  }
+
   Future<void> _openReports({int initialTabIndex = 0}) async {
     if (!await _checkLoginAndNavigate('reports') || !mounted) return;
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ReportsScreen(
@@ -651,12 +730,17 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       ),
     );
+    if (mounted) await _loadRecentActivity();
   }
 
   Future<void> _callEmergency() async {
-    final uri = Uri.parse(_emergencyNumber);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+    final uri = Uri(scheme: 'tel', path: _emergencyPhoneDigits);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      // Phone dialer unavailable on this platform (e.g. some web builds).
     }
   }
 
@@ -746,7 +830,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       endDrawer: _buildProfileDrawer(),
       body: Column(
         children: [
@@ -759,12 +843,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: Stack(
               fit: StackFit.expand,
               children: [
-                const ColoredBox(color: AppColors.blush),
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _DashboardContentBackgroundPainter(),
-                  ),
-                ),
+                const ColoredBox(color: AppColors.white),
                 Theme(
                   data: Theme.of(context).copyWith(
                     scrollbarTheme: ScrollbarThemeData(
@@ -859,12 +938,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         _isLoggedIn ? _patientDisplayName : GuestSession.displayName,
       );
 
-  String get _displayInitial {
-    final trimmed = _displayName.trim();
-    if (trimmed.isEmpty) return 'P';
-    return trimmed[0].toUpperCase();
-  }
-
   Widget _buildHeroHeader() {
     final topPadding = MediaQuery.paddingOf(context).top;
 
@@ -914,33 +987,24 @@ class _DashboardScreenState extends State<DashboardScreen>
               children: [
                 Row(
                   children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppColors.white,
-                        borderRadius: BorderRadius.circular(10),
+                    // Brand mark only — sized to stay clear of header actions.
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: 188,
+                        maxHeight: 54,
                       ),
-                      child: Icon(
-                        Icons.local_hospital_rounded,
-                        color: AppColors.primaryRed,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Bahria Town\nInternational Hospital',
-                        style: AppTypography.raleway(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white.withValues(alpha: 0.95),
-                          height: 1.25,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        height: 52,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.centerLeft,
                       ),
                     ),
+                    const Spacer(),
+                    _buildNotificationHeaderButton(),
+                    const SizedBox(width: 8),
+                    _buildMessagesHeaderButton(),
+                    const SizedBox(width: 8),
                     _buildProfileMenuButton(forHero: true),
                   ],
                 ),
@@ -988,14 +1052,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Text(
-                          '·',
+                          '\u00B7',
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.7),
                           ),
                         ),
                       ),
                       Text(
-                        'Patient portal',
+                        'Patient Portal',
                         style: AppTypography.roboto(
                           fontSize: 13,
                           color: Colors.white.withValues(alpha: 0.88),
@@ -1005,7 +1069,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   )
                 else
                   Text(
-                    'Guest mode · Login for full access',
+                    'Guest mode \u00B7 Login for full access',
                     style: AppTypography.roboto(
                       fontSize: 13,
                       color: Colors.white.withValues(alpha: 0.88),
@@ -1014,6 +1078,69 @@ class _DashboardScreenState extends State<DashboardScreen>
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNotificationHeaderButton() {
+    return TapFeedback(
+      onTap: _openNotifications,
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 38,
+        height: 38,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: AppColors.white.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.white.withValues(alpha: 0.22),
+                ),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.notifications_none_rounded,
+                color: AppColors.white,
+                size: 20,
+              ),
+            ),
+            if (_notificationBadgeCount > 0)
+              Positioned(
+                top: 2,
+                right: 2,
+                child: _UnreadBadge(count: _notificationBadgeCount),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessagesHeaderButton() {
+    return TapFeedback(
+      onTap: _openMessages,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: AppColors.white.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: AppColors.white.withValues(alpha: 0.22),
+          ),
+        ),
+        alignment: Alignment.center,
+        child: const Icon(
+          Icons.chat_bubble_outline_rounded,
+          color: AppColors.white,
+          size: 19,
         ),
       ),
     );
@@ -1037,22 +1164,14 @@ class _DashboardScreenState extends State<DashboardScreen>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                color: forHero ? AppColors.duskMaroon : AppColors.blush,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _displayInitial,
-                style: AppTypography.montserrat(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: forHero ? AppColors.white : AppColors.primaryRed,
-                ),
-              ),
+            PatientAvatar(
+              displayName: _displayName,
+              imageUrl: AuthSession.profileImageUrl,
+              size: 30,
+              backgroundColor:
+                  forHero ? AppColors.duskMaroon : AppColors.blush,
+              foregroundColor:
+                  forHero ? AppColors.white : AppColors.primaryRed,
             ),
             const SizedBox(width: 6),
             ConstrainedBox(
@@ -1096,7 +1215,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     return Drawer(
       width: drawerWidth,
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.horizontal(left: Radius.circular(24)),
       ),
@@ -1157,25 +1276,16 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: AppColors.white.withValues(alpha: 0.18),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppColors.white.withValues(alpha: 0.35),
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            _displayInitial,
-                            style: AppTypography.montserrat(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.white,
-                            ),
-                          ),
+                        PatientAvatar(
+                          displayName: _displayName,
+                          imageUrl: AuthSession.profileImageUrl,
+                          size: 52,
+                          backgroundColor:
+                              AppColors.white.withValues(alpha: 0.18),
+                          foregroundColor: AppColors.white,
+                          showBorder: true,
+                          borderColor:
+                              AppColors.white.withValues(alpha: 0.35),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -1213,7 +1323,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 )
                               else
                                 Text(
-                                  'Guest · Patient Portal',
+                                  'Guest \u00B7 Patient Portal',
                                   style: AppTypography.roboto(
                                     fontSize: 12,
                                     color: AppColors.white.withValues(alpha: 0.82),
@@ -1233,45 +1343,36 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
               children: [
-                if (_isLoggedIn) ...[
-                  _profileDrawerTile(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Profile',
-                    onTap: () {
-                      _closeProfileDrawer();
-                      _openProfile();
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  _profileDrawerTile(
-                    icon: Icons.notifications_none_rounded,
-                    label: 'Notifications',
-                    badge: _notificationBadgeCount,
-                    onTap: () {
-                      _closeProfileDrawer();
-                      _openNotifications();
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                ],
                 _profileDrawerTile(
-                  icon: Icons.settings_outlined,
-                  label: 'Settings',
-                  onTap: () {
-                    _closeProfileDrawer();
-                    if (_isLoggedIn) {
-                      _openProfile();
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Login to access settings'),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
-                  },
+                  icon: Icons.person_outline_rounded,
+                  label: 'Profile Management',
+                  onTap: _openProfile,
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
+                _profileDrawerTile(
+                  icon: Icons.notifications_none_rounded,
+                  label: 'Notification Preferences',
+                  onTap: _openNotificationPreferences,
+                ),
+                const SizedBox(height: 8),
+                _profileDrawerTile(
+                  icon: Icons.shield_outlined,
+                  label: 'Security Settings',
+                  onTap: _openSecuritySettings,
+                ),
+                const SizedBox(height: 8),
+                _profileDrawerTile(
+                  icon: Icons.privacy_tip_outlined,
+                  label: 'Privacy Policy',
+                  onTap: _openPrivacyPolicy,
+                ),
+                const SizedBox(height: 8),
+                _profileDrawerTile(
+                  icon: Icons.help_outline_rounded,
+                  label: 'Help & Support',
+                  onTap: _openHelpSupport,
+                ),
+                const SizedBox(height: 8),
                 _profileDrawerTile(
                   icon: Icons.logout_rounded,
                   label: _isLoggedIn ? 'Logout' : 'Exit guest mode',
@@ -1675,8 +1776,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildHealthSnapshot() {
-    final prescriptions = _isLoggedIn ? '$_prescriptionsCount' : '—';
-    final medications = _isLoggedIn ? '$_medicationsCount' : '—';
+    final prescriptions = '$_prescriptionsCount';
+    final medications = '$_medicationsCount';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1684,7 +1785,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         Row(
           children: [
             Text(
-              'Health snapshot',
+              'Health Snapshot',
               style: AppTypography.raleway(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -1700,13 +1801,13 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
             const SizedBox(width: 12),
             TapFeedback(
-              onTap: () => _openReports(initialTabIndex: 3),
+              onTap: _openMedicationReminders,
               borderRadius: BorderRadius.circular(6),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'View details',
+                    'View Details',
                     style: AppTypography.raleway(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -1731,8 +1832,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 count: prescriptions,
                 label: 'Active prescriptions',
                 icon: Icons.description_outlined,
-                background: AppColors.softRed,
-                iconBackground: AppColors.lightMaroon,
+                background: AppColors.rxCardBg,
+                iconBackground: AppColors.rxIconBg,
                 iconColor: AppColors.primaryRed,
                 countColor: AppColors.deepRed,
                 onTap: () => _openReports(initialTabIndex: 3),
@@ -1848,34 +1949,12 @@ class _DashboardScreenState extends State<DashboardScreen>
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Recent activity',
+                'Recent Activity',
                 style: AppTypography.raleway(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                   color: AppColors.deepRed,
                 ),
-              ),
-            ),
-            TapFeedback(
-              onTap: () => _switchMainTab(3),
-              borderRadius: BorderRadius.circular(6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'View all',
-                    style: AppTypography.raleway(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryRed,
-                    ),
-                  ),
-                  const Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 12,
-                    color: AppColors.primaryRed,
-                  ),
-                ],
               ),
             ),
           ],
@@ -1916,20 +1995,17 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildActivityRow(
-    _RecentActivityItem item, {
+    RecentActivityItem item, {
     required int index,
     required bool showTimeline,
   }) {
-    final ({Color icon, Color background}) accent;
-    if (item.title == 'Visit completed') {
-      accent = AppColors.activityPalette[index % AppColors.activityPalette.length];
-    } else {
-      accent = (icon: item.iconColor, background: item.iconBackground);
-    }
-    final isVisit = item.title == 'Visit completed';
+    final accent =
+        AppColors.activityPalette[index % AppColors.activityPalette.length];
+    final timestamp =
+        DashboardHelpers.formatActivityTimestamp(item.viewedAt);
 
     return TapFeedback(
-      onTap: () => _switchMainTab(3),
+      onTap: () => _openRecentActivity(item),
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1947,13 +2023,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                       color: accent.background,
                       shape: BoxShape.circle,
                     ),
-                    child: isVisit
-                        ? _StethoscopeIcon(color: accent.icon, size: 18)
-                        : Icon(
-                            item.icon,
-                            size: 18,
-                            color: accent.icon,
-                          ),
+                    child: Icon(
+                      item.icon,
+                      size: 18,
+                      color: accent.icon,
+                    ),
                   ),
                   if (showTimeline)
                     Container(
@@ -1998,7 +2072,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  item.timestamp,
+                  timestamp,
                   style: AppTypography.roboto(
                     fontSize: 12,
                     color: AppColors.greyText,
@@ -2020,117 +2094,94 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildEmergencyBlock() {
     return Container(
-      width: double.infinity,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppColors.duskMaroon,
-            AppColors.deepRed,
-          ],
+        borderRadius: BorderRadius.circular(18),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF6B1524), AppColors.deepRed],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         ),
-        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: AppColors.duskMaroon.withValues(alpha: 0.22),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: AppColors.deepRed.withValues(alpha: 0.22),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -24,
-              right: -16,
-              child: _decorativeBlob(
-                80,
-                AppColors.white.withValues(alpha: 0.07),
-              ),
+      padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(12),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            child: const Icon(
+              Icons.local_hospital_rounded,
+              color: AppColors.primaryRed,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'NEED URGENT MEDICAL HELP?',
+                  style: AppTypography.raleway(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.white,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Emergency assistance 24/7',
+                  style: AppTypography.roboto(
+                    fontSize: 12,
+                    color: AppColors.white.withValues(alpha: 0.85),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TapFeedback(
+            onTap: _callEmergency,
+            borderRadius: BorderRadius.circular(22),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.primaryRed,
+                borderRadius: BorderRadius.circular(22),
+              ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.white.withValues(alpha: 0.14),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.local_hospital_rounded,
+                  const Icon(
+                    Icons.phone_in_talk_rounded,
+                    size: 16,
+                    color: AppColors.white,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Call',
+                    style: AppTypography.raleway(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
                       color: AppColors.white,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '\NEED URGENT MEDICAL HELP?',
-                          style: AppTypography.raleway(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.5,
-                            color: AppColors.white.withValues(alpha: 0.92),
-                          ),
-                        ),
-                        Text(
-                          'Emergency assistance 24/7',
-                          style: AppTypography.roboto(
-                            fontSize: 11,
-                            color: AppColors.white.withValues(alpha: 0.82),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TapFeedback(
-                    onTap: _callEmergency,
-                    borderRadius: BorderRadius.circular(18),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.rustRed,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.phone_in_talk_rounded,
-                            size: 15,
-                            color: AppColors.white,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Call',
-                            style: AppTypography.raleway(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.white,
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -2144,62 +2195,42 @@ class _DashboardScreenState extends State<DashboardScreen>
 }
 
 /// Stethoscope glyph for recent-activity rows (matches dashboard mockup).
-class _StethoscopeIcon extends StatelessWidget {
-  const _StethoscopeIcon({required this.color, this.size = 18});
+class _UnreadBadge extends StatelessWidget {
+  final int count;
 
-  final Color color;
-  final double size;
+  const _UnreadBadge({required this.count});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CustomPaint(
-        painter: _StethoscopeIconPainter(color),
+    final label = count > 99 ? '99+' : '$count';
+    final isWide = label.length >= 2;
+
+    return Container(
+      height: 14,
+      constraints: BoxConstraints(
+        minWidth: isWide ? 18 : 14,
+      ),
+      padding: EdgeInsets.symmetric(horizontal: isWide ? 3 : 0),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.deepRed, width: 1.2),
+      ),
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: AppColors.deepRed,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w800,
+          height: 1,
+        ),
       ),
     );
   }
 }
 
-class _StethoscopeIconPainter extends CustomPainter {
-  _StethoscopeIconPainter(this.color);
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final stroke = size.width * 0.09;
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final w = size.width;
-    final h = size.height;
-
-    canvas.drawCircle(Offset(w * 0.5, h * 0.74), w * 0.15, paint);
-
-    final tube = Path()
-      ..moveTo(w * 0.5, h * 0.59)
-      ..lineTo(w * 0.5, h * 0.36)
-      ..cubicTo(w * 0.5, h * 0.16, w * 0.2, h * 0.1, w * 0.17, h * 0.28)
-      ..moveTo(w * 0.5, h * 0.36)
-      ..cubicTo(w * 0.5, h * 0.16, w * 0.8, h * 0.1, w * 0.83, h * 0.28);
-    canvas.drawPath(tube, paint);
-
-    canvas.drawCircle(Offset(w * 0.17, h * 0.33), w * 0.085, paint);
-    canvas.drawCircle(Offset(w * 0.83, h * 0.33), w * 0.085, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _StethoscopeIconPainter oldDelegate) =>
-      oldDelegate.color != color;
-}
-
-/// Notched bottom edge on the burgundy hero — bubbles only, no cross pattern.
 class _DashboardHeroClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
@@ -2220,54 +2251,4 @@ class _DashboardHeroClipper extends CustomClipper<Path> {
 
   @override
   bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
-}
-
-/// Soft blush background with subtle maroon bubble accents under the hero.
-class _DashboardContentBackgroundPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppColors.blush,
-            AppColors.white.withValues(alpha: 0.92),
-            AppColors.fieldFill.withValues(alpha: 0.35),
-          ],
-          stops: const [0.0, 0.45, 1.0],
-        ).createShader(rect),
-    );
-
-    void drawBubble(Offset center, double radius, Color color) {
-      canvas.drawCircle(center, radius, Paint()..color = color);
-    }
-
-    drawBubble(
-      Offset(size.width * 0.88, size.height * 0.08),
-      72,
-      AppColors.softRed.withValues(alpha: 0.35),
-    );
-    drawBubble(
-      Offset(size.width * 0.12, size.height * 0.22),
-      56,
-      AppColors.lightMaroon.withValues(alpha: 0.28),
-    );
-    drawBubble(
-      Offset(size.width * 0.92, size.height * 0.55),
-      48,
-      AppColors.softRed.withValues(alpha: 0.22),
-    );
-    drawBubble(
-      Offset(size.width * 0.06, size.height * 0.72),
-      64,
-      AppColors.blush.withValues(alpha: 0.55),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

@@ -1,6 +1,7 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:btih_andriod_app/models/patient_model.dart';
+import 'package:btih_andriod_app/services/recent_activity_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
@@ -68,11 +69,13 @@ class VisitHistoryFilters {
 class VisitHistoryScreen extends StatefulWidget {
   final String patientMrNo;
   final String patientName;
+  final int? focusVisitId;
 
   const VisitHistoryScreen({
     super.key,
     required this.patientMrNo,
     required this.patientName,
+    this.focusVisitId,
   });
 
   @override
@@ -80,7 +83,6 @@ class VisitHistoryScreen extends StatefulWidget {
 }
 
 class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
-  PatientProfileData? _profile;
   List<PatientVisit> _allVisits = [];
   bool _isLoading = true;
   String? _error;
@@ -119,9 +121,11 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
       if (response.statusCode == 200) {
         final parsed =
             PatientApiResponse.fromDynamic(json.decode(response.body));
-        final visits = List<PatientVisit>.from(parsed.visitHistory);
+        final visits = List<PatientVisit>.from(parsed.visitHistory)
+          // Never show OPD in patient history — even if the API returns them.
+          .where((visit) => !visit.isOpdVisit)
+          .toList();
         setState(() {
-          _profile = parsed.profile;
           _allVisits = visits;
           _isLoading = false;
         });
@@ -188,38 +192,7 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
     final time = _formatTime(raw);
     final date = _formatDate(raw);
     if (time.isEmpty) return date;
-    return '$date · $time';
-  }
-
-  String _formatGender(String gender) {
-    switch (gender.toUpperCase()) {
-      case 'M':
-        return 'Male';
-      case 'F':
-        return 'Female';
-      default:
-        return gender.isNotEmpty ? gender : 'Not recorded';
-    }
-  }
-
-  int? _calculateAge(String dob) {
-    final dt = _parseDate(dob);
-    if (dt == null) return null;
-    final now = DateTime.now();
-    var age = now.year - dt.year;
-    if (now.month < dt.month ||
-        (now.month == dt.month && now.day < dt.day)) {
-      age--;
-    }
-    return age;
-  }
-
-  String get _displayPatientName {
-    if (_profile != null) {
-      final name = '${_profile!.firstName} ${_profile!.lastName}'.trim();
-      if (name.isNotEmpty) return name;
-    }
-    return widget.patientName.isNotEmpty ? widget.patientName : 'Patient';
+    return '$date \u00B7 $time';
   }
 
   String _visitPrimaryDate(PatientVisit visit) {
@@ -266,6 +239,9 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
   }
 
   bool _matchesFilters(PatientVisit visit) {
+    // Hard rule: OPD never appears in patient visit history.
+    if (visit.isOpdVisit) return false;
+
     final date = _parseDate(_visitPrimaryDate(visit));
 
     if (_filters.year != null && _visitYear(visit) != _filters.year) {
@@ -347,21 +323,6 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
     );
   }
 
-  void _showProfileSheet(PatientProfileData profile) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _ProfileBottomSheet(
-        profile: profile,
-        patientName: _displayPatientName,
-        mrNo: widget.patientMrNo,
-        formatGender: _formatGender,
-        formatDate: _formatDate,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -410,27 +371,6 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-                          child: _profile != null
-                              ? _PatientSummaryCard(
-                                  name: _displayPatientName,
-                                  mrNo: _profile!.mrNo.isNotEmpty
-                                      ? _profile!.mrNo
-                                      : widget.patientMrNo,
-                                  gender: _formatGender(_profile!.gender),
-                                  age: _calculateAge(_profile!.dateOfBirth),
-                                  onViewProfile: () =>
-                                      _showProfileSheet(_profile!),
-                                )
-                              : _PatientSummaryCard(
-                                  name: _displayPatientName,
-                                  mrNo: widget.patientMrNo,
-                                  gender: 'Not recorded',
-                                  age: null,
-                                  onViewProfile: null,
-                                ),
-                        ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                           child: _buildSearchBar(),
@@ -733,6 +673,9 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
           visit: visit,
           primaryDate: _visitPrimaryDate(visit),
           isLast: isLast,
+          initiallyExpanded: widget.focusVisitId != null &&
+              visit.patientVisitId == widget.focusVisitId,
+          patientMrNo: widget.patientMrNo,
           formatDayMonth: _formatDayMonth,
           formatYear: _formatYear,
           formatTime: _formatTime,
@@ -807,291 +750,6 @@ class _VisitHistoryScreenState extends State<VisitHistoryScreen> {
   }
 }
 
-class _PatientSummaryCard extends StatelessWidget {
-  final String name;
-  final String mrNo;
-  final String gender;
-  final int? age;
-  final VoidCallback? onViewProfile;
-
-  const _PatientSummaryCard({
-    required this.name,
-    required this.mrNo,
-    required this.gender,
-    required this.age,
-    this.onViewProfile,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.fieldBorder),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.shadow.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: AppColors.softRed,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: AppColors.primaryRed.withValues(alpha: 0.15),
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      name.isNotEmpty ? name[0].toUpperCase() : 'P',
-                      style: AppTypography.montserrat(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primaryRed,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTypography.raleway(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.darkText,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'MR No: $mrNo',
-                        style: AppTypography.roboto(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.greyText,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          _DemographicChip(label: gender),
-                          if (age != null) _DemographicChip(label: '$age Years'),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (onViewProfile != null)
-            TapFeedback(
-              onTap: onViewProfile!,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border(
-                    top: BorderSide(color: AppColors.fieldBorder),
-                  ),
-                ),
-                child: Text(
-                  'View Profile',
-                  textAlign: TextAlign.center,
-                  style: AppTypography.raleway(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primaryRed,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DemographicChip extends StatelessWidget {
-  final String label;
-
-  const _DemographicChip({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.softRed,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.primaryRed.withValues(alpha: 0.15),
-        ),
-      ),
-      child: Text(
-        label,
-        style: AppTypography.roboto(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: AppColors.primaryRed,
-        ),
-      ),
-    );
-  }
-}
-
-class _ProfileBottomSheet extends StatelessWidget {
-  final PatientProfileData profile;
-  final String patientName;
-  final String mrNo;
-  final String Function(String) formatGender;
-  final String Function(String) formatDate;
-
-  const _ProfileBottomSheet({
-    required this.profile,
-    required this.patientName,
-    required this.mrNo,
-    required this.formatGender,
-    required this.formatDate,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.55,
-      minChildSize: 0.35,
-      maxChildSize: 0.85,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: AppColors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: ListView(
-            controller: scrollController,
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.fieldBorder,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Patient Profile',
-                style: AppTypography.raleway(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.deepRed,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _ProfileDetailRow('Name', patientName),
-              _ProfileDetailRow(
-                'MR No',
-                profile.mrNo.isNotEmpty ? profile.mrNo : mrNo,
-              ),
-              _ProfileDetailRow('Gender', formatGender(profile.gender)),
-              _ProfileDetailRow(
-                'Date of Birth',
-                formatDate(profile.dateOfBirth),
-              ),
-              _ProfileDetailRow(
-                'Blood Group',
-                _VisitField.displayValue(profile.bloodGroup),
-              ),
-              _ProfileDetailRow(
-                'Contact',
-                _VisitField.displayValue(profile.contactNo),
-              ),
-              _ProfileDetailRow(
-                'CNIC',
-                _VisitField.displayValue(profile.cnic),
-              ),
-              _ProfileDetailRow(
-                'Email',
-                _VisitField.displayValue(profile.emailAddress),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ProfileDetailRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ProfileDetailRow(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.fieldFill,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.fieldBorder.withValues(alpha: 0.7)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: AppTypography.roboto(
-                fontSize: 11,
-                color: AppColors.greyText,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: AppTypography.roboto(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: AppColors.darkText,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _YearBadge extends StatelessWidget {
   final int year;
 
@@ -1133,6 +791,8 @@ class _TimelineVisitRow extends StatelessWidget {
   final PatientVisit visit;
   final String primaryDate;
   final bool isLast;
+  final bool initiallyExpanded;
+  final String patientMrNo;
   final String Function(String) formatDayMonth;
   final String Function(String) formatYear;
   final String Function(String) formatTime;
@@ -1142,6 +802,8 @@ class _TimelineVisitRow extends StatelessWidget {
     required this.visit,
     required this.primaryDate,
     required this.isLast,
+    required this.initiallyExpanded,
+    required this.patientMrNo,
     required this.formatDayMonth,
     required this.formatYear,
     required this.formatTime,
@@ -1227,6 +889,8 @@ class _TimelineVisitRow extends StatelessWidget {
           Expanded(
             child: _TimelineVisitCard(
               visit: visit,
+              initiallyExpanded: initiallyExpanded,
+              patientMrNo: patientMrNo,
               formatDateTime: formatDateTime,
             ),
           ),
@@ -1238,10 +902,14 @@ class _TimelineVisitRow extends StatelessWidget {
 
 class _TimelineVisitCard extends StatefulWidget {
   final PatientVisit visit;
+  final bool initiallyExpanded;
+  final String patientMrNo;
   final String Function(String) formatDateTime;
 
   const _TimelineVisitCard({
     required this.visit,
+    required this.initiallyExpanded,
+    required this.patientMrNo,
     required this.formatDateTime,
   });
 
@@ -1250,7 +918,27 @@ class _TimelineVisitCard extends StatefulWidget {
 }
 
 class _TimelineVisitCardState extends State<_TimelineVisitCard> {
-  bool _expanded = false;
+  late bool _expanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.initiallyExpanded;
+    if (_expanded) {
+      _trackVisitOpen();
+    }
+  }
+
+  void _trackVisitOpen() {
+    RecentActivityService.instance.trackVisit(
+      scopeId: RecentActivityService.instance.resolveScope(
+        patientMrNo: widget.patientMrNo,
+      ),
+      patientVisitId: widget.visit.patientVisitId,
+      doctorName: widget.visit.displayDoctor,
+      department: widget.visit.displayDepartment,
+    );
+  }
 
   static String displayValue(String? value) =>
       _VisitField.displayValue(value);
@@ -1508,7 +1196,11 @@ class _TimelineVisitCardState extends State<_TimelineVisitCard> {
             ),
           ],
           TapFeedback(
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: () {
+              final willExpand = !_expanded;
+              setState(() => _expanded = willExpand);
+              if (willExpand) _trackVisitOpen();
+            },
             borderRadius: const BorderRadius.vertical(
               bottom: Radius.circular(14),
             ),

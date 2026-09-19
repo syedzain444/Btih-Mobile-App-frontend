@@ -21,6 +21,7 @@ class AuthSession {
   static const _mrNoKey = 'auth_mr_no';
   static const _firstNameKey = 'auth_first_name';
   static const _lastNameKey = 'auth_last_name';
+  static const _profileImageUrlKey = 'auth_profile_image_url';
   static const _loggedInKey = 'auth_is_logged_in';
   static const _expiresAtKey = 'auth_expires_at';
 
@@ -31,12 +32,14 @@ class AuthSession {
   static String? _mrNo;
   static String? _firstName;
   static String? _lastName;
+  static String? _profileImageUrl;
   static bool _isLoggedIn = false;
   static DateTime? _expiresAt;
   static Timer? _expiryTimer;
 
   static String? get token => _token;
   static String? get mrNo => _mrNo;
+  static String? get profileImageUrl => _profileImageUrl;
   static DateTime? get expiresAt => _expiresAt;
   static String get displayName {
     final first = _firstName?.trim() ?? '';
@@ -77,6 +80,7 @@ class AuthSession {
     _mrNo = prefs.getString(_mrNoKey);
     _firstName = prefs.getString(_firstNameKey);
     _lastName = prefs.getString(_lastNameKey);
+    _profileImageUrl = prefs.getString(_profileImageUrlKey);
     _isLoggedIn = prefs.getBool(_loggedInKey) ?? false;
 
     final expiresRaw = prefs.getString(_expiresAtKey);
@@ -142,6 +146,18 @@ class AuthSession {
     await prefs.setString(_lastNameKey, _lastName ?? '');
   }
 
+  static Future<void> updateProfileImageUrl(String? url) async {
+    final trimmed = url?.trim();
+    _profileImageUrl =
+        (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    final prefs = await SharedPreferences.getInstance();
+    if (_profileImageUrl == null) {
+      await prefs.remove(_profileImageUrlKey);
+    } else {
+      await prefs.setString(_profileImageUrlKey, _profileImageUrl!);
+    }
+  }
+
   static DateTime resolveExpiresAt(Map<String, dynamic> response) {
     final expiresAtRaw = response['expiresAt']?.toString();
     if (expiresAtRaw != null && expiresAtRaw.isNotEmpty) {
@@ -203,6 +219,17 @@ class AuthSession {
     _scheduleExpiryTimer();
   }
 
+  /// Clears session and returns to welcome (same as dashboard logout).
+  static Future<void> logOut() async {
+    await clear();
+    final navigator = navigatorKey?.currentState;
+    if (navigator == null) return;
+    navigator.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+      (_) => false,
+    );
+  }
+
   static Future<void> clear() async {
     _expiryTimer?.cancel();
     _expiryTimer = null;
@@ -211,6 +238,7 @@ class AuthSession {
     _mrNo = null;
     _firstName = null;
     _lastName = null;
+    _profileImageUrl = null;
     _expiresAt = null;
     _isLoggedIn = false;
     if (!kIsWeb) {
@@ -224,6 +252,7 @@ class AuthSession {
     await prefs.remove(_mrNoKey);
     await prefs.remove(_firstNameKey);
     await prefs.remove(_lastNameKey);
+    await prefs.remove(_profileImageUrlKey);
     await prefs.remove(_loggedInKey);
     await prefs.remove(_expiresAtKey);
   }

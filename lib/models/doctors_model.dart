@@ -18,6 +18,25 @@ class Doctor {
 
   });
 
+  factory Doctor.minimal({
+    required int id,
+    required String doctorName,
+    required int departmentId,
+    String specializationName = '',
+    String doctorDescription = '',
+    String? doctorImagePath,
+  }) {
+    return Doctor(
+      serialNumber: 0,
+      id: id,
+      doctorName: doctorName,
+      departmentId: departmentId,
+      doctorDescription: doctorDescription,
+      specializationName: specializationName,
+      doctorImagePath: doctorImagePath,
+    );
+  }
+
   factory Doctor.fromJson(Map<String, dynamic> json) {
     return Doctor(
       serialNumber: _readInt(json, ['serialNumber', 'SerialNumber']) ?? 0,

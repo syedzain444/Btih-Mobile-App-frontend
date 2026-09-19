@@ -12,6 +12,7 @@ class AppPrimaryButton extends StatelessWidget {
     this.showArrow = false,
     this.height = 56,
     this.useBrandGradient = false,
+    this.fullWidth = true,
   });
 
   final String label;
@@ -20,6 +21,7 @@ class AppPrimaryButton extends StatelessWidget {
   final bool showArrow;
   final double height;
   final bool useBrandGradient;
+  final bool fullWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -36,9 +38,9 @@ class AppPrimaryButton extends StatelessWidget {
             ],
           );
 
-    return SizedBox(
+    final button = SizedBox(
       height: height,
-      width: double.infinity,
+      width: fullWidth ? double.infinity : null,
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: radius,
@@ -63,7 +65,11 @@ class AppPrimaryButton extends StatelessWidget {
               ),
               child: InkWell(
                 onTap: loading ? null : onPressed,
-                child: Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: fullWidth ? 0 : 28,
+                  ),
+                  child: Center(
                   child: loading
                       ? const SizedBox(
                           height: 20,
@@ -96,11 +102,21 @@ class AppPrimaryButton extends StatelessWidget {
                           ],
                         ),
                 ),
+                ),
               ),
             ),
           ),
         ),
       ),
+    );
+
+    if (fullWidth) {
+      return button;
+    }
+
+    return Align(
+      alignment: Alignment.center,
+      child: button,
     );
   }
 }

@@ -7,44 +7,96 @@ class PatientReport {
   final String? mrNo;
   final String invoiceNo;
   final String department;
+  final String? departmentCode;
   final String? visitDate;
   final String paymentDate;
   final String? paymentMethod;
   final double amount;
+  final double? paidAmount;
+  final double? balanceAmount;
   final bool? isCancel;
   final String? cancelReason;
+  final String? paymentStatus;
+  final int? reportId;
 
   PatientReport({
     required this.billId,
     this.mrNo,
     required this.invoiceNo,
     required this.department,
+    this.departmentCode,
     this.visitDate,
     required this.paymentDate,
     this.paymentMethod,
     required this.amount,
+    this.paidAmount,
+    this.balanceAmount,
     this.isCancel,
     this.cancelReason,
+    this.paymentStatus,
+    this.reportId,
   });
 
   factory PatientReport.fromJson(Map<String, dynamic> json) {
+    final departmentCode = json['departmentCode']?.toString();
+    final departmentName = json['department']?.toString() ?? '';
+
     return PatientReport(
       billId: json['billId']?.toString() ?? '',
       mrNo: json['mrNo']?.toString(),
       invoiceNo: json['invoiceNo']?.toString() ?? '',
-      department: json['department']?.toString() ?? '',
+      department: departmentCode ?? departmentName,
+      departmentCode: departmentCode,
       visitDate: json['visitDate']?.toString(),
       paymentDate: json['paymentDate']?.toString() ?? '',
       paymentMethod: json['paymentMethod']?.toString(),
       amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
-      isCancel: json['isCancel'],
+      paidAmount: (json['paidAmount'] as num?)?.toDouble(),
+      balanceAmount: (json['balanceAmount'] as num?)?.toDouble(),
+      isCancel: _parseBool(json['isCancel']),
       cancelReason: json['cancelReason']?.toString(),
+      paymentStatus: json['paymentStatus']?.toString(),
+      reportId: (json['reportId'] as num?)?.toInt(),
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'billId': billId,
+        'mrNo': mrNo,
+        'invoiceNo': invoiceNo,
+        'department': department,
+        'departmentCode': departmentCode,
+        'visitDate': visitDate,
+        'paymentDate': paymentDate,
+        'paymentMethod': paymentMethod,
+        'amount': amount,
+        'paidAmount': paidAmount,
+        'balanceAmount': balanceAmount,
+        'isCancel': isCancel,
+        'cancelReason': cancelReason,
+        'paymentStatus': paymentStatus,
+        'reportId': reportId,
+      };
+
+  static bool? _parseBool(dynamic value) {
+    if (value == null) return null;
+    if (value is bool) return value;
+    final normalized = value.toString().trim().toUpperCase();
+    if (normalized == 'Y' || normalized == 'YES' || normalized == '1') {
+      return true;
+    }
+    if (normalized == 'N' || normalized == 'NO' || normalized == '0') {
+      return false;
+    }
+    return null;
+  }
+
+  String get filterDepartmentCode =>
+      (departmentCode ?? department).toUpperCase();
+
   // Helper method to get formatted department name
   String get formattedDepartment {
-    switch (department.toUpperCase()) {
+    switch (filterDepartmentCode) {
       case 'EMERGENCY':
         return 'Emergency';
       case 'OPD':

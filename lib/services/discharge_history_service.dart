@@ -17,10 +17,25 @@ class DischargeHistoryService {
       
       if (response.statusCode == 200) {
         return DischargeHistoryResponse.fromJson(response.data);
-      } else {
-        throw Exception("Failed to load discharge history: ${response.statusCode}");
       }
+      if (response.statusCode == 404) {
+        return DischargeHistoryResponse(
+          pageNumber: pageNumber,
+          pageSize: pageSize,
+          totalRecords: 0,
+          data: const [],
+        );
+      }
+      throw Exception("Failed to load discharge history: ${response.statusCode}");
     } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        return DischargeHistoryResponse(
+          pageNumber: pageNumber,
+          pageSize: pageSize,
+          totalRecords: 0,
+          data: const [],
+        );
+      }
       throw Exception("Network error: ${e.message}");
     } catch (e) {
       throw Exception("Unexpected error: $e");
