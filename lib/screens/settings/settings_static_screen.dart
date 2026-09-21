@@ -1,3 +1,4 @@
+import 'package:btih_andriod_app/services/content_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
@@ -7,13 +8,38 @@ import 'package:flutter/material.dart';
 
 enum SettingsStaticPage { privacyPolicy }
 
-class SettingsStaticScreen extends StatelessWidget {
+class SettingsStaticScreen extends StatefulWidget {
   const SettingsStaticScreen({
     super.key,
     required this.page,
   });
 
   final SettingsStaticPage page;
+
+  @override
+  State<SettingsStaticScreen> createState() => _SettingsStaticScreenState();
+}
+
+class _SettingsStaticScreenState extends State<SettingsStaticScreen> {
+  String? _remoteBody;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRemote();
+  }
+
+  Future<void> _loadRemote() async {
+    final body = await ContentService.instance.bodyFor('en', 'privacy_policy') ??
+        await ContentService.instance.bodyFor('en', 'privacy') ??
+        await ContentService.instance.bodyFor('en', 'PRIVACY_POLICY');
+    if (!mounted) return;
+    setState(() {
+      _remoteBody = body;
+      _loading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,20 +59,35 @@ class SettingsStaticScreen extends StatelessWidget {
           AppBarIconBadge(icon: Icons.lock_outline_rounded),
         ],
       ),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-        children: [
-          const _PrivacyHeroCard(),
-          const SizedBox(height: 12),
-          for (final section in _privacyCards) ...[
-            _PrivacySectionCard(section: section),
-            const SizedBox(height: 10),
-          ],
-          const SizedBox(height: 4),
-          const _PrivacyFooterCard(),
-        ],
-      ),
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primaryRed),
+            )
+          : ListView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              children: [
+                const _PrivacyHeroCard(),
+                const SizedBox(height: 12),
+                if (_remoteBody != null && _remoteBody!.trim().isNotEmpty)
+                  _PrivacySectionCard(
+                    section: _PrivacyCard(
+                      title: 'Privacy Policy',
+                      body: _remoteBody!,
+                      icon: Icons.policy_outlined,
+                      iconColor: AppColors.deepRed,
+                      iconBg: const Color(0xFFF6DEE1),
+                    ),
+                  )
+                else
+                  for (final section in _privacyCards) ...[
+                    _PrivacySectionCard(section: section),
+                    const SizedBox(height: 10),
+                  ],
+                const SizedBox(height: 4),
+                const _PrivacyFooterCard(),
+              ],
+            ),
     );
   }
 }
@@ -169,7 +210,7 @@ class _PrivacySectionCardState extends State<_PrivacySectionCard> {
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                children:[
                   Text(
                     section.title,
                     style: AppTypography.raleway(

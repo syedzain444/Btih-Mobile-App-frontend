@@ -314,7 +314,22 @@ class BillingService {
   }
 
   Future<BillingPaymentSummary> getPaymentSummary(String mrNo) async {
-    // Prefer history (often already cached) instead of a second Oracle call.
+    try {
+      final response = await ApiConfig.client.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/Billing/payment-summary/$mrNo'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final body = json.decode(response.body);
+        if (body is Map<String, dynamic>) {
+          return BillingPaymentSummary.fromJson(body);
+        }
+      }
+    } catch (_) {
+      // Fall through to history-based summary.
+    }
+
     final history = await getHistory(mrNo);
     return BillingPaymentSummary.fromReports(
       mrNo: mrNo,

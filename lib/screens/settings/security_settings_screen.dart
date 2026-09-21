@@ -321,7 +321,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       });
       CustomMessageDialog.showSuccess(
         context,
-        'Password changed successfully',
+        'Password Changed Successfully',
       );
     } on AuthApiException catch (e) {
       if (!mounted) return;

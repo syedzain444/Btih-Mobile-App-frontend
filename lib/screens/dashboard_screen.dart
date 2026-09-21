@@ -15,6 +15,7 @@ import 'package:btih_andriod_app/services/guest_session.dart';
 import 'package:btih_andriod_app/services/medication_service.dart';
 import 'package:btih_andriod_app/services/notification_service.dart';
 import 'package:btih_andriod_app/services/recent_activity_service.dart';
+import 'package:btih_andriod_app/screens/telemedicine_screen.dart';
 import 'package:btih_andriod_app/screens/welcome_screen.dart';
 import 'package:btih_andriod_app/screens/medication_reminders_screen.dart';
 import 'package:btih_andriod_app/screens/messaging/message_inbox_screen.dart';
@@ -30,6 +31,7 @@ import 'package:btih_andriod_app/screens/visit_history_screen.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/widgets/billing/invoice_details_modal.dart';
 import 'package:btih_andriod_app/widgets/guest_profile_required_dialog.dart';
+import 'package:btih_andriod_app/widgets/offline_banner.dart';
 import 'package:btih_andriod_app/widgets/patient_avatar.dart';
 import 'package:btih_andriod_app/widgets/patient_bottom_nav_bar.dart';
 import 'package:btih_andriod_app/services/profile_photo_service.dart';
@@ -834,6 +836,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       endDrawer: _buildProfileDrawer(),
       body: Column(
         children: [
+          const OfflineBanner(),
           _fadeSlideIn(
             animation: _greetingAnim,
             offsetY: 0.04,
@@ -1372,6 +1375,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                   label: 'Help & Support',
                   onTap: _openHelpSupport,
                 ),
+                if (_isLoggedIn) ...[
+                  const SizedBox(height: 8),
+                  _profileDrawerTile(
+                    icon: Icons.videocam_outlined,
+                    label: 'Telemedicine',
+                    onTap: () {
+                      _closeProfileDrawer();
+                      openTelemedicineScreen(context);
+                    },
+                  ),
+                ],
                 const SizedBox(height: 8),
                 _profileDrawerTile(
                   icon: Icons.logout_rounded,
@@ -1957,6 +1971,30 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
             ),
+            if (_recentActivity.isNotEmpty && _isLoggedIn)
+              TapFeedback(
+                onTap: () async {
+                  final scope = RecentActivityService.instance.resolveScope(
+                    patientMrNo: widget.patientMrNo,
+                  );
+                  await RecentActivityService.instance.clearAll(scope);
+                  if (!mounted) return;
+                  await _loadRecentActivity();
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  child: Text(
+                    'Clear',
+                    style: AppTypography.roboto(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primaryRed,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
         const SizedBox(height: 12),

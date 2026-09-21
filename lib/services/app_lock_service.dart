@@ -34,6 +34,50 @@ class AppLockService extends ChangeNotifier {
   Future<void> init() async {
     // One-time: clear old variable-length PINs so users re-set a 4-digit PIN.
     await _clearLegacyPinsIfNeeded();
+    final mrNo = AuthSession.mrNo?.trim();
+    if (mrNo != null && mrNo.isNotEmpty && AuthSession.isLoggedIn) {
+      await reconcileWithServer(mrNo);
+    }
+  }
+
+  /// Align local PIN state with `GET /api/AppPin/status`.
+  Future<void> reconcileWithServer(String mrNo) async {
+    final trimmed = mrNo.trim();
+    if (trimmed.isEmpty || !AuthSession.isLoggedIn) return;
+
+    try {
+      final response = await ApiConfig.client.get(
+        Uri.parse(
+          '${ApiConfig.baseUrl}/api/AppPin/status?mrNo=${Uri.encodeQueryComponent(trimmed)}',
+        ),
+        headers: {
+          'Accept': 'application/json',
+          ...AuthSession.authHeaders,
+        },
+      );
+      if (response.statusCode != 200) return;
+
+      final body = jsonDecode(response.body);
+      if (body is! Map) return;
+      final serverHasPin = body['hasPin'] == true;
+      final localHasPin = await hasPin(trimmed);
+
+      if (!serverHasPin && localHasPin) {
+        // Server cleared PIN — drop local hash so lock does not stay armed.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_pinKey(trimmed));
+        await SecurityPreferencesService.setPinLockEnabled(trimmed, false);
+        if (_locked) {
+          _locked = false;
+          notifyListeners();
+        }
+      } else if (serverHasPin && !localHasPin) {
+        // PIN exists on server but not on this device — require re-setup locally.
+        await SecurityPreferencesService.setPinLockEnabled(trimmed, false);
+      }
+    } catch (e) {
+      debugPrint('AppLockService.reconcileWithServer failed: $e');
+    }
   }
 
   Future<void> _clearLegacyPinsIfNeeded() async {

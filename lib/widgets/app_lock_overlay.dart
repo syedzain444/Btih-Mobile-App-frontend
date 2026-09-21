@@ -23,6 +23,7 @@ class _AppLockOverlayState extends State<AppLockOverlay>
   String _pin = '';
   String? _error;
   bool _showForgotPassword = false;
+  bool _verifying = false;
 
   @override
   void initState() {
@@ -49,14 +50,18 @@ class _AppLockOverlayState extends State<AppLockOverlay>
       setState(() => _showForgotPassword = false);
     } else {
       setState(() {});
+      _focusPinField();
     }
   }
 
   void _onPinTextChanged() {
+    if (_verifying) return;
+
     final raw = _pinController.text;
     final digits = raw.replaceAll(RegExp(r'\D'), '');
     final maxLen = AppLockService.pinLength;
     final clipped = digits.length > maxLen ? digits.substring(0, maxLen) : digits;
+
     if (raw != clipped) {
       _pinController.value = TextEditingValue(
         text: clipped,
@@ -64,20 +69,35 @@ class _AppLockOverlayState extends State<AppLockOverlay>
       );
       return;
     }
+
     if (_pin == clipped) return;
+
     setState(() {
       _pin = clipped;
-      _error = null;
+      if (clipped.isNotEmpty) _error = null;
     });
+
     if (clipped.length == maxLen) {
       _unlockWithPin();
     }
   }
 
-  void _resetPinEntry() {
+  void _resetPinEntry({bool keepError = false}) {
     _pinController.clear();
     _pin = '';
-    _error = null;
+    if (!keepError) _error = null;
+  }
+
+  void _focusPinField() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !AppLockService.instance.isLocked || _showForgotPassword) {
+        return;
+      }
+      if (!_pinFocus.hasFocus) {
+        _pinFocus.requestFocus();
+      }
+      SystemChannels.textInput.invokeMethod('TextInput.show');
+    });
   }
 
   void _showToast(String message) {
@@ -106,23 +126,44 @@ class _AppLockOverlayState extends State<AppLockOverlay>
   }
 
   Future<void> _unlockWithPin() async {
+    if (_verifying) return;
+
     final mrNo = AuthSession.mrNo ?? '';
     final expected = AppLockService.pinLength;
-    if (_pin.length != expected) {
+    final attempt = _pin;
+
+    if (attempt.length != expected) {
       setState(() => _error = 'Enter your $expected-digit PIN');
+      _focusPinField();
       return;
     }
 
-    final ok = await AppLockService.instance.verifyPin(mrNo, _pin);
+    setState(() {
+      _verifying = true;
+      _error = null;
+    });
+
+    final ok = await AppLockService.instance.verifyPin(mrNo, attempt);
     if (!mounted) return;
+
     if (ok) {
       _resetPinEntry();
+      setState(() => _verifying = false);
       AppLockService.instance.unlock();
-    } else {
-      setState(() => _error = 'Incorrect PIN');
-      _pinController.clear();
-      _pin = '';
+      return;
     }
+
+    // Wrong PIN — clear and let the user try again immediately.
+    _pinController.removeListener(_onPinTextChanged);
+    _pinController.clear();
+    _pinController.addListener(_onPinTextChanged);
+
+    setState(() {
+      _verifying = false;
+      _pin = '';
+      _error = 'Incorrect PIN. Try again.';
+    });
+    _focusPinField();
   }
 
   Future<void> _openForgotPassword() async {
@@ -140,7 +181,9 @@ class _AppLockOverlayState extends State<AppLockOverlay>
     _resetPinEntry();
     setState(() => _showForgotPassword = false);
     AppLockService.instance.unlock();
-    _showToast('Password updated. App lock PIN was cleared — set a new PIN in Security Settings if needed.');
+    _showToast(
+      'Password updated. App lock PIN was cleared — set a new PIN in Security Settings if needed.',
+    );
   }
 
   @override
@@ -161,6 +204,7 @@ class _AppLockOverlayState extends State<AppLockOverlay>
                       onCancelled: () {
                         if (mounted) {
                           setState(() => _showForgotPassword = false);
+                          _focusPinField();
                         }
                       },
                     )
@@ -185,7 +229,7 @@ class _AppLockOverlayState extends State<AppLockOverlay>
                             ),
                             const SizedBox(height: 20),
                             Text(
-                              'App locked',
+                              'App Locked',
                               style: AppTypography.raleway(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w700,
@@ -203,28 +247,47 @@ class _AppLockOverlayState extends State<AppLockOverlay>
                             ),
                             const SizedBox(height: 28),
                             GestureDetector(
-                              onTap: () => _pinFocus.requestFocus(),
+                              onTap: _focusPinField,
                               behavior: HitTestBehavior.opaque,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Opacity(
-                                    opacity: 0,
-                                    child: SizedBox(
-                                      height: 1,
+                              child: SizedBox(
+                                height: 56,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    // Off-screen style field — no visible underline/line.
+                                    Opacity(
+                                      opacity: 0,
                                       child: TextField(
                                         controller: _pinController,
                                         focusNode: _pinFocus,
                                         keyboardType: TextInputType.number,
                                         maxLength: pinLen,
                                         autofocus: true,
+                                        enabled: !_verifying,
                                         enableSuggestions: false,
                                         autocorrect: false,
-                                        obscureText: false,
+                                        obscureText: true,
+                                        style: const TextStyle(
+                                          color: Colors.transparent,
+                                          fontSize: 16,
+                                        ),
+                                        cursorColor: Colors.transparent,
+                                        showCursor: false,
                                         smartDashesType:
                                             SmartDashesType.disabled,
                                         smartQuotesType:
                                             SmartQuotesType.disabled,
+                                        decoration: const InputDecoration(
+                                          isCollapsed: true,
+                                          border: InputBorder.none,
+                                          enabledBorder: InputBorder.none,
+                                          focusedBorder: InputBorder.none,
+                                          disabledBorder: InputBorder.none,
+                                          errorBorder: InputBorder.none,
+                                          focusedErrorBorder: InputBorder.none,
+                                          contentPadding: EdgeInsets.zero,
+                                          counterText: '',
+                                        ),
                                         inputFormatters: [
                                           FilteringTextInputFormatter
                                               .digitsOnly,
@@ -235,43 +298,48 @@ class _AppLockOverlayState extends State<AppLockOverlay>
                                         onSubmitted: (_) => _unlockWithPin(),
                                       ),
                                     ),
-                                  ),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: List.generate(pinLen, (index) {
-                                      final filled = index < _pin.length;
-                                      return Container(
-                                        width: 48,
-                                        height: 52,
-                                        margin: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                        ),
-                                        alignment: Alignment.center,
-                                        decoration: BoxDecoration(
-                                          color: AppColors.fieldFill,
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                          border: Border.all(
-                                            color: filled
-                                                ? AppColors.deepRed
-                                                : AppColors.fieldBorder,
-                                            width: filled ? 1.5 : 1,
-                                          ),
-                                        ),
-                                        child: filled
-                                            ? Container(
-                                                width: 10,
-                                                height: 10,
-                                                decoration: const BoxDecoration(
-                                                  color: AppColors.deepRed,
-                                                  shape: BoxShape.circle,
-                                                ),
-                                              )
-                                            : null,
-                                      );
-                                    }),
-                                  ),
-                                ],
+                                    IgnorePointer(
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children:
+                                            List.generate(pinLen, (index) {
+                                          final filled = index < _pin.length;
+                                          return Container(
+                                            width: 48,
+                                            height: 52,
+                                            margin: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                            ),
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
+                                              color: AppColors.white,
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: filled
+                                                    ? AppColors.deepRed
+                                                    : AppColors.fieldBorder,
+                                                width: filled ? 1.5 : 1,
+                                              ),
+                                            ),
+                                            child: filled
+                                                ? Container(
+                                                    width: 10,
+                                                    height: 10,
+                                                    decoration:
+                                                        const BoxDecoration(
+                                                      color: AppColors.deepRed,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  )
+                                                : null,
+                                          );
+                                        }),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                             if (_error != null) ...[
@@ -286,12 +354,13 @@ class _AppLockOverlayState extends State<AppLockOverlay>
                             ],
                             const SizedBox(height: 20),
                             AppPrimaryButton(
-                              label: 'Unlock',
-                              onPressed: _unlockWithPin,
+                              label: _verifying ? 'Checking…' : 'Unlock',
+                              onPressed: _verifying ? null : _unlockWithPin,
                             ),
                             const SizedBox(height: 8),
                             TextButton(
-                              onPressed: _openForgotPassword,
+                              onPressed:
+                                  _verifying ? null : _openForgotPassword,
                               child: Text(
                                 'Forgot PIN?',
                                 style: AppTypography.roboto(
@@ -302,9 +371,11 @@ class _AppLockOverlayState extends State<AppLockOverlay>
                               ),
                             ),
                             TextButton.icon(
-                              onPressed: () => _showToast(
-                                'Biometric unlock will be available in a future update.',
-                              ),
+                              onPressed: _verifying
+                                  ? null
+                                  : () => _showToast(
+                                        'Biometric unlock will be available in a future update.',
+                                      ),
                               icon: const Icon(
                                 Icons.fingerprint_rounded,
                                 color: AppColors.deepRed,

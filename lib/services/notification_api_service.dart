@@ -8,15 +8,113 @@ class NotificationInboxResult {
   final List<AppNotification> notifications;
   final int unreadCount;
   final int totalRecords;
+  /// When loaded from inbox-grouped, categories keep server order.
+  final List<NotificationCategoryGroup>? categories;
 
   const NotificationInboxResult({
     required this.notifications,
     required this.unreadCount,
     required this.totalRecords,
+    this.categories,
+  });
+}
+
+class NotificationCategoryGroup {
+  final String category;
+  final String title;
+  final int count;
+  final int unreadCount;
+  final List<AppNotification> items;
+
+  const NotificationCategoryGroup({
+    required this.category,
+    required this.title,
+    required this.count,
+    required this.unreadCount,
+    required this.items,
   });
 }
 
 class NotificationApiService {
+  Future<NotificationInboxResult> getInboxGrouped({
+    required String mrNo,
+    int pageSize = 100,
+  }) async {
+    final uri =
+        Uri.parse('${ApiConfig.baseUrl}/api/Notification/inbox-grouped')
+            .replace(
+      queryParameters: {
+        'mrNo': mrNo,
+        'pageSize': '$pageSize',
+      },
+    );
+
+    final response = await ApiConfig.client.get(uri);
+
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body);
+      if (json is! Map<String, dynamic>) {
+        return const NotificationInboxResult(
+          notifications: [],
+          unreadCount: 0,
+          totalRecords: 0,
+        );
+      }
+
+      final rawCategories = json['categories'];
+      final groups = <NotificationCategoryGroup>[];
+      final flat = <AppNotification>[];
+
+      if (rawCategories is List) {
+        for (final raw in rawCategories) {
+          if (raw is! Map) continue;
+          final map = Map<String, dynamic>.from(raw);
+          final itemsRaw = map['items'];
+          final items = itemsRaw is List
+              ? itemsRaw
+                  .whereType<Map>()
+                  .map(
+                    (item) => AppNotification.fromApiJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .toList()
+              : <AppNotification>[];
+          flat.addAll(items);
+          groups.add(
+            NotificationCategoryGroup(
+              category: map['category']?.toString() ?? 'general',
+              title: map['title']?.toString() ??
+                  map['category']?.toString() ??
+                  'General',
+              count: int.tryParse('${map['count']}') ?? items.length,
+              unreadCount: int.tryParse('${map['unreadCount']}') ?? 0,
+              items: items,
+            ),
+          );
+        }
+      }
+
+      return NotificationInboxResult(
+        notifications: flat,
+        unreadCount: int.tryParse('${json['unreadCount']}') ?? 0,
+        totalRecords:
+            int.tryParse('${json['totalRecords']}') ?? flat.length,
+        categories: groups,
+      );
+    }
+
+    if (response.statusCode == 404) {
+      return const NotificationInboxResult(
+        notifications: [],
+        unreadCount: 0,
+        totalRecords: 0,
+      );
+    }
+
+    throw Exception(_errorMessage(response, 'Failed to load notifications'));
+  }
+
   Future<NotificationInboxResult> getInbox({
     required String mrNo,
     int pageNumber = 1,
@@ -112,11 +210,7 @@ class NotificationApiService {
       body: jsonEncode({'mrNo': mrNo}),
     );
 
-    if (response.statusCode == 200) {
-      return;
-    }
-
-    if (response.statusCode == 404) {
+    if (response.statusCode == 200 || response.statusCode == 404) {
       return;
     }
 

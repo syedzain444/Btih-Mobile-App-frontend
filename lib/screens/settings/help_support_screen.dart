@@ -1,3 +1,5 @@
+import 'package:btih_andriod_app/screens/support/support_tickets_screen.dart';
+import 'package:btih_andriod_app/services/support_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
@@ -6,32 +8,75 @@ import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class HelpSupportScreen extends StatelessWidget {
+class HelpSupportScreen extends StatefulWidget {
   const HelpSupportScreen({super.key});
 
-  static const _mainPhone = '021111284111';
-  static const _emergencyPhone = '02199202121';
+  @override
+  State<HelpSupportScreen> createState() => _HelpSupportScreenState();
+}
+
+class _HelpSupportScreenState extends State<HelpSupportScreen> {
+  final _service = SupportService();
+
+  SupportContact _contact = const SupportContact(
+    hospitalName: 'Bahria Town International Hospital',
+    phone: '03491660025',
+    email: 'info@btkhospital.com',
+    address: 'Bahria Town, Karachi',
+    workingHours: '24/7 Emergency | OPD 8:00 AM – 8:00 PM',
+  );
+  List<SupportFaqItem> _faqItems = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final results = await Future.wait([
+        _service.getContact(),
+        _service.getFaq(lang: 'en'),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _contact = results[0] as SupportContact;
+        _faqItems = results[1] as List<SupportFaqItem>;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  String get _phoneDigits =>
+      _contact.phone.replaceAll(RegExp(r'[^0-9+]'), '');
 
   Future<void> _launchTel(String digits) async {
-    final uri = Uri(scheme: 'tel', path: digits);
+    final cleaned = digits.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (cleaned.isEmpty) return;
+    final uri = Uri(scheme: 'tel', path: cleaned);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
-  Future<void> _launchEmail(String email, {String? subject}) async {
-    final uri = Uri(
-      scheme: 'mailto',
-      path: email,
-      query: subject != null ? 'subject=${Uri.encodeComponent(subject)}' : null,
-    );
+  Future<void> _launchEmail(String email) async {
+    if (email.isEmpty) return;
+    final uri = Uri(scheme: 'mailto', path: email);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
   Future<void> _launchMaps() async {
-    const query = 'Bahria Town International Hospital Karachi';
+    final query = _contact.address.isNotEmpty
+        ? _contact.address
+        : _contact.hospitalName;
     final uri = Uri.parse(
       'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}',
     );
@@ -40,7 +85,7 @@ class HelpSupportScreen extends StatelessWidget {
     }
   }
 
-  void _showFaqAnswer(BuildContext context, _FaqItem item) {
+  void _showFaqAnswer(SupportFaqItem item) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.white,
@@ -92,7 +137,7 @@ class HelpSupportScreen extends StatelessWidget {
     );
   }
 
-  void _showAllFaqs(BuildContext context) {
+  void _showAllFaqs() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -107,7 +152,6 @@ class HelpSupportScreen extends StatelessWidget {
           child: SafeArea(
             top: false,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 12),
                 Center(
@@ -144,7 +188,7 @@ class HelpSupportScreen extends StatelessWidget {
                       return TapFeedback(
                         onTap: () {
                           Navigator.pop(ctx);
-                          _showFaqAnswer(context, item);
+                          _showFaqAnswer(item);
                         },
                         borderRadius: BorderRadius.circular(8),
                         child: Padding(
@@ -161,10 +205,10 @@ class HelpSupportScreen extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              Icon(
+                              const Icon(
                                 Icons.chevron_right_rounded,
                                 size: 20,
-                                color: AppColors.primaryRed.withValues(alpha: 0.8),
+                                color: AppColors.primaryRed,
                               ),
                             ],
                           ),
@@ -183,6 +227,16 @@ class HelpSupportScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final phoneDisplay =
+        _contact.phone.isNotEmpty ? _contact.phone : '—';
+    final emailDisplay =
+        _contact.email.isNotEmpty ? _contact.email : '—';
+    final addressDisplay =
+        _contact.address.isNotEmpty ? _contact.address : 'Hospital location';
+    final hoursDisplay = _contact.workingHours.isNotEmpty
+        ? _contact.workingHours
+        : '24/7 Emergency';
+
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppAppBar(
@@ -199,120 +253,173 @@ class HelpSupportScreen extends StatelessWidget {
           AppBarIconBadge(icon: Icons.help_outline_rounded),
         ],
       ),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-        children: [
-          Text(
-            "We're here to help. Reach out to us anytime.",
-            style: AppTypography.roboto(
-              fontSize: 14,
-              color: AppColors.greyText,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 18),
-          const _SectionHeading(title: 'Get in Touch'),
-          const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 0.78,
-            children: [
-              _ContactCard(
-                icon: Icons.phone_in_talk_outlined,
-                title: 'Call Us',
-                subtitle: 'General inquiries',
-                detail: '+92 3491660025',
-                onTap: () => _launchTel(_mainPhone),
-              ),
-              _ContactCard(
-                icon: Icons.mail_outline_rounded,
-                title: 'Email Us',
-                subtitle: 'Send us an email',
-                detail: 'info@btkhospital.com',
-                onTap: () => _launchEmail('info@btkhospital.com'),
-              ),
-              _ContactCard(
-                icon: Icons.location_on_outlined,
-                title: 'Visit Us',
-                subtitle: 'Find our location',
-                detail: '2nd Ave, Jinnah Ave Service Road',
-                onTap: _launchMaps,
-              ),
-              _ContactCard(
-                icon: Icons.local_hospital_outlined,
-                title: 'Emergency',
-                subtitle: '24/7 emergency line',
-                detail: '021-37187111',
-                onTap: () => _launchTel(_emergencyPhone),
-              ),
-              _ContactCard(
-                icon: Icons.rate_review_outlined,
-                title: 'Feedback',
-                subtitle: 'Share your experience',
-                detail: 'Submit Feedback',
-                onTap: () => _launchEmail(
-                  'info@btkhospital.com',
-                  subject: 'Patient Portal Feedback',
+      body: _loading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primaryRed),
+            )
+          : RefreshIndicator(
+              color: AppColors.primaryRed,
+              onRefresh: _load,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
                 ),
-              ),
-              _ContactCard(
-                icon: Icons.support_agent_outlined,
-                title: 'Patient Support',
-                subtitle: 'Dedicated assistance',
-                detail: 'Contact Support',
-                onTap: () => _launchTel(_mainPhone),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              const Expanded(child: _SectionHeading(title: 'FAQ')),
-              TapFeedback(
-                onTap: () => _showAllFaqs(context),
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+                children: [
+                  const _SectionHeading(title: 'Get in Touch'),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Reach out to ${_contact.hospitalName}.',
+                    style: AppTypography.roboto(
+                      fontSize: 13,
+                      color: AppColors.greyText,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 0.92,
                     children: [
-                      Text(
-                        'View All',
-                        style: AppTypography.roboto(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.primaryRed,
-                        ),
+                      _ContactCard(
+                        icon: Icons.phone_in_talk_outlined,
+                        title: 'Call Us',
+                        subtitle: 'General Enquiries',
+                        detail: phoneDisplay,
+                        onTap: () => _launchTel(_phoneDigits),
                       ),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        size: 18,
-                        color: AppColors.primaryRed.withValues(alpha: 0.9),
+                      _ContactCard(
+                        icon: Icons.mail_outline_rounded,
+                        title: 'Email Us',
+                        subtitle: 'Send Us An Email',
+                        detail: emailDisplay,
+                        onTap: () => _launchEmail(_contact.email),
+                      ),
+                      _ContactCard(
+                        icon: Icons.location_on_outlined,
+                        title: 'Visit Us',
+                        subtitle: 'Find Our Location',
+                        detail: addressDisplay,
+                        onTap: _launchMaps,
+                      ),
+                      _ContactCard(
+                        icon: Icons.access_time_rounded,
+                        title: 'Hours',
+                        subtitle: 'Working Hours',
+                        detail: hoursDisplay,
+                        onTap: () {},
                       ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 24),
+                  TapFeedback(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const SupportTicketsScreen(),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.blush,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.softRed),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.confirmation_number_outlined,
+                            color: AppColors.primaryRed,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Support tickets',
+                              style: AppTypography.raleway(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.darkText,
+                              ),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            color: AppColors.primaryRed,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Expanded(child: _SectionHeading(title: 'FAQ')),
+                      if (_faqItems.isNotEmpty)
+                        TapFeedback(
+                          onTap: _showAllFaqs,
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 2,
+                              vertical: 2,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'View All',
+                                  style: AppTypography.roboto(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.deepRed,
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
+                                  color: AppColors.deepRed,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (_faqItems.isEmpty)
+                    Text(
+                      'FAQ will appear here when available from the server.',
+                      style: AppTypography.roboto(
+                        fontSize: 13,
+                        color: AppColors.greyText,
+                      ),
+                    )
+                  else
+                    ..._faqItems.take(4).map(
+                          (item) => _FaqRow(
+                            question: item.question,
+                            onTap: () => _showFaqAnswer(item),
+                          ),
+                        ),
+                  const SizedBox(height: 24),
+                  _AssistanceBanner(
+                    onCall: () => _launchTel(_phoneDigits),
+                  ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ..._faqItems.take(4).map(
-            (item) => _FaqRow(
-              question: item.question,
-              onTap: () => _showFaqAnswer(context, item),
             ),
-          ),
-          const SizedBox(height: 20),
-          _AssistanceBanner(
-            onCall: () => _launchTel(_mainPhone),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -370,7 +477,7 @@ class _ContactCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
         decoration: BoxDecoration(
           color: AppColors.white,
           borderRadius: BorderRadius.circular(16),
@@ -380,58 +487,41 @@ class _ContactCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 34,
-              height: 34,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: AppColors.softRed,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, size: 18, color: AppColors.primaryRed),
+              child: Icon(icon, color: AppColors.primaryRed, size: 20),
             ),
-            const SizedBox(height: 10),
+            const Spacer(),
             Text(
               title,
               style: AppTypography.raleway(
-                fontSize: 13,
+                fontSize: 14,
                 fontWeight: FontWeight.w700,
-                color: AppColors.deepRed,
+                color: AppColors.darkText,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 2),
             Text(
               subtitle,
               style: AppTypography.roboto(
-                fontSize: 10,
+                fontSize: 11,
                 color: AppColors.greyText,
-                height: 1.3,
               ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              detail,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-            ),
-            const Spacer(),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    detail,
-                    style: AppTypography.roboto(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryRed,
-                      height: 1.25,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  size: 16,
-                  color: AppColors.primaryRed.withValues(alpha: 0.75),
-                ),
-              ],
+              style: AppTypography.roboto(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.deepRed,
+              ),
             ),
           ],
         ),
@@ -441,10 +531,7 @@ class _ContactCard extends StatelessWidget {
 }
 
 class _FaqRow extends StatelessWidget {
-  const _FaqRow({
-    required this.question,
-    required this.onTap,
-  });
+  const _FaqRow({required this.question, required this.onTap});
 
   final String question;
   final VoidCallback onTap;
@@ -453,30 +540,11 @@ class _FaqRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return TapFeedback(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: const BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: AppColors.hairline),
-          ),
-        ),
         child: Row(
           children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: AppColors.softRed,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.add_rounded,
-                size: 18,
-                color: AppColors.primaryRed.withValues(alpha: 0.9),
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 question,
@@ -487,10 +555,10 @@ class _FaqRow extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(
+            const Icon(
               Icons.chevron_right_rounded,
               size: 20,
-              color: AppColors.primaryRed.withValues(alpha: 0.75),
+              color: AppColors.primaryRed,
             ),
           ],
         ),
@@ -507,74 +575,45 @@ class _AssistanceBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
       decoration: BoxDecoration(
-        color: AppColors.blush,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.fieldBorder),
+        gradient: const LinearGradient(
+          colors: [AppColors.primaryRed, AppColors.deepRed],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.softRed,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.headset_mic_outlined,
-              size: 22,
-              color: AppColors.primaryRed,
-            ),
-          ),
-          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Need Immediate Assistance?',
-                  style: AppTypography.raleway(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.deepRed,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Our support team is available 24/7',
-                  style: AppTypography.roboto(
-                    fontSize: 12,
-                    color: AppColors.greyText,
-                  ),
-                ),
-              ],
+            child: Text(
+              'Need immediate assistance?',
+              style: AppTypography.raleway(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.white,
+              ),
             ),
           ),
-          const SizedBox(width: 8),
           TapFeedback(
             onTap: onCall,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(20),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                gradient: AppColors.primaryGradient,
-                borderRadius: BorderRadius.circular(999),
+                color: AppColors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.phone_in_talk_rounded,
-                    size: 14,
-                    color: AppColors.white,
-                  ),
-                  const SizedBox(width: 4),
+                  const Icon(Icons.phone, size: 14, color: AppColors.white),
+                  const SizedBox(width: 5),
                   Text(
-                    'Call Now',
+                    'Call',
                     style: AppTypography.roboto(
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: FontWeight.w700,
                       color: AppColors.white,
                     ),
@@ -588,54 +627,3 @@ class _AssistanceBanner extends StatelessWidget {
     );
   }
 }
-
-class _FaqItem {
-  const _FaqItem({required this.question, required this.answer});
-
-  final String question;
-  final String answer;
-}
-
-const _faqItems = [
-  _FaqItem(
-    question: 'How can I book an appointment?',
-    answer:
-        'Open Find a Doctor from the dashboard, choose a specialist, pick an '
-        'available slot, and confirm your booking. You can also view upcoming '
-        'visits under Appointments.',
-  ),
-  _FaqItem(
-    question: 'What are the visiting hours?',
-    answer:
-        'General OPD hours are typically 9:00 AM to 5:00 PM on weekdays. '
-        'Emergency services are available 24/7. Ward visiting hours may vary—'
-        'check with the nursing station on arrival.',
-  ),
-  _FaqItem(
-    question: 'How can I get my test results?',
-    answer:
-        'Lab and radiology reports appear in Records once they are verified by '
-        'the hospital. Open Records from the dashboard and select the report '
-        'type you need.',
-  ),
-  _FaqItem(
-    question: 'What should I do in case of an emergency?',
-    answer:
-        'For urgent medical help, tap Emergency Call on the dashboard or dial '
-        'the hospital emergency line immediately. Do not use the app for '
-        'life-threatening situations—call or visit the emergency department.',
-  ),
-  _FaqItem(
-    question: 'How do I reset my password?',
-    answer:
-        'Open the menu → Security Settings → Change password. '
-        'You will receive an OTP on your registered mobile number to verify '
-        'your identity.',
-  ),
-  _FaqItem(
-    question: 'Can I download my bills and reports?',
-    answer:
-        'Yes. Open Billing or Records, select the item you need, and use the '
-        'download option when available to save a PDF to your device.',
-  ),
-];

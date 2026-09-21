@@ -1,6 +1,7 @@
 import 'package:btih_andriod_app/models/patient_report_model.dart';
-import 'package:btih_andriod_app/screens/billing/invoice_detail_screen.dart';
 import 'package:btih_andriod_app/services/billing_service.dart';
+import 'package:btih_andriod_app/services/notification_service.dart';
+import 'package:btih_andriod_app/services/payment_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/billing_departments.dart';
@@ -8,9 +9,9 @@ import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-enum _PaymentTab { pending, recent }
-
+/// Pay Now screen — pending bills, checkout initiate/confirm, online history.
 class PaymentScreen extends StatefulWidget {
   final String patientMrNo;
   final String patientName;
@@ -18,7 +19,7 @@ class PaymentScreen extends StatefulWidget {
   const PaymentScreen({
     super.key,
     required this.patientMrNo,
-    required this.patientName,
+    this.patientName = '',
   });
 
   @override
@@ -26,20 +27,24 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
+  static const _paidGreen = Color(0xFF2E7D32);
+
   final BillingService _billingService = BillingService();
+  final PaymentService _paymentService = PaymentService();
+
   BillingPaymentSummary? _summary;
-  _PaymentTab _selectedTab = _PaymentTab.pending;
+  List<PaymentIntent> _onlineHistory = const [];
   bool _isLoading = true;
   String? _errorMessage;
-  bool _showAmounts = true;
+  int? _payingBillKey;
 
   @override
   void initState() {
     super.initState();
-    _loadSummary();
+    _load();
   }
 
-  Future<void> _loadSummary() async {
+  Future<void> _load() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -48,13 +53,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
     try {
       final summary =
           await _billingService.getPaymentSummary(widget.patientMrNo);
+      List<PaymentIntent> history = const [];
+      try {
+        history = await _paymentService.getHistory(widget.patientMrNo);
+      } catch (_) {
+        // Online history is optional if the table is not seeded yet.
+      }
+
       if (!mounted) return;
       setState(() {
         _summary = summary;
+        _onlineHistory = history;
         _isLoading = false;
-        if (summary.pendingBillCount == 0 && summary.recentPayments.isNotEmpty) {
-          _selectedTab = _PaymentTab.recent;
-        }
       });
     } catch (_) {
       if (!mounted) return;
@@ -65,240 +75,116 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
-  void _openInvoice(PatientReport report) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => InvoiceDetailScreen(
-          patientMrNo: widget.patientMrNo,
-          initialReport: report,
-        ),
-      ),
-    );
-  }
-
-  PreferredSizeWidget _buildAppBar() {
-    return AppAppBar(
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Payments',
-            style: AppTypography.raleway(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: AppColors.white,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'MR No: ${widget.patientMrNo}',
-            style: AppTypography.roboto(
-              fontSize: 13,
-              color: AppColors.white.withValues(alpha: 0.82),
-            ),
-          ),
-        ],
-      ),
-      actions: const [
-        AppBarIconBadge(icon: Icons.payments_outlined),
-      ],
-    );
-  }
-
-  Widget _buildSummaryCard(BillingPaymentSummary summary) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [AppColors.deepRed, AppColors.primaryRed],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primaryRed.withValues(alpha: 0.25),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Pending Balance',
-                    style: AppTypography.roboto(
-                      fontSize: 13,
-                      color: AppColors.white.withValues(alpha: 0.88),
-                    ),
-                  ),
-                ),
-                TapFeedback(
-                  onTap: () => setState(() => _showAmounts = !_showAmounts),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(
-                      _showAmounts
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      size: 18,
-                      color: AppColors.white.withValues(alpha: 0.9),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _showAmounts
-                  ? formatBillingCurrency(summary.totalPendingAmount)
-                  : 'Rs. ******',
-              style: AppTypography.montserrat(
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-                color: AppColors.white,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: _SummaryMetric(
-                    label: 'Pending bills',
-                    value: '${summary.pendingBillCount}',
-                  ),
-                ),
-                Container(
-                  width: 1,
-                  height: 36,
-                  color: AppColors.white.withValues(alpha: 0.25),
-                ),
-                Expanded(
-                  child: _SummaryMetric(
-                    label: 'Paid Total',
-                    value: _showAmounts
-                        ? formatBillingCurrency(summary.totalPaidAmount)
-                        : 'Rs. *****',
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoBanner() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.softRed,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: AppColors.primaryRed.withValues(alpha: 0.2),
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(
-              Icons.info_outline_rounded,
-              size: 20,
-              color: AppColors.primaryRed,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Online payment is not available yet. Please visit the hospital billing counter to settle pending bills.',
-                style: AppTypography.roboto(
-                  fontSize: 13,
-                  color: AppColors.darkText,
-                  height: 1.4,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabSelector(BillingPaymentSummary summary) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: AppColors.fieldFill,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.fieldBorder),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: _TabChip(
-                label: 'Pending (${summary.pendingBillCount})',
-                selected: _selectedTab == _PaymentTab.pending,
-                onTap: () => setState(() => _selectedTab = _PaymentTab.pending),
-              ),
-            ),
-            Expanded(
-              child: _TabChip(
-                label: 'Recent (${summary.recentPayments.length})',
-                selected: _selectedTab == _PaymentTab.recent,
-                onTap: () => setState(() => _selectedTab = _PaymentTab.recent),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBillList() {
-    final summary = _summary!;
-    final isPending = _selectedTab == _PaymentTab.pending;
-    final bills =
-        isPending ? summary.pendingBills : summary.recentPayments;
-
-    if (bills.isEmpty) {
-      return _EmptyState(
-        icon: isPending
-            ? Icons.check_circle_outline_rounded
-            : Icons.receipt_long_outlined,
-        title: isPending ? 'No pending payments' : 'No recent payments',
-        subtitle: isPending
-            ? 'All your bills are settled.'
-            : 'Your paid bills will appear here.',
-      );
+  Future<void> _payBill(PatientReport bill) async {
+    final amount = (bill.balanceAmount != null && bill.balanceAmount! > 0)
+        ? bill.balanceAmount!
+        : bill.amount;
+    if (amount <= 0) {
+      _toast('Nothing due on this bill.');
+      return;
     }
 
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-      itemCount: bills.length,
-      separatorBuilder: (_, _2) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        return _PaymentBillTile(
-          report: bills[index],
-          isPending: isPending,
-          showAmount: _showAmounts,
-          onTap: () => _openInvoice(bills[index]),
-        );
-      },
+    setState(() => _payingBillKey = bill.billId.hashCode);
+
+    try {
+      final intent = await _paymentService.initiate(
+        mrNo: widget.patientMrNo,
+        amount: amount,
+        billId: bill.billId,
+        invoiceNo: bill.invoiceNo,
+      );
+
+      if (!mounted) return;
+
+      final checkout = intent.checkoutUrl;
+      if (checkout != null && checkout.isNotEmpty) {
+        final uri = Uri.tryParse(checkout);
+        if (uri != null) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      }
+
+      if (!mounted) return;
+      final shouldConfirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            'Confirm payment',
+            style: AppTypography.raleway(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppColors.darkText,
+            ),
+          ),
+          content: Text(
+            'Complete payment in the browser, then tap Confirm.\n\n'
+            'Amount: ${formatBillingCurrency(amount)}\n'
+            'Ref: ${intent.gatewayRef ?? intent.paymentId}',
+            style: AppTypography.roboto(
+              fontSize: 14,
+              color: AppColors.greyText,
+              height: 1.4,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(
+                'Cancel',
+                style: AppTypography.raleway(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.greyText,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(
+                'Confirm',
+                style: AppTypography.raleway(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primaryRed,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldConfirm != true) {
+        if (mounted) setState(() => _payingBillKey = null);
+        return;
+      }
+
+      final confirmed = await _paymentService.confirm(
+        paymentId: intent.paymentId,
+        gatewayRef: intent.gatewayRef,
+      );
+
+      if (!mounted) return;
+
+      await NotificationService.instance.notifyPaymentConfirmed(
+        mrNo: widget.patientMrNo,
+        amount: formatBillingCurrency(confirmed.amount),
+        reference: confirmed.invoiceNo ?? bill.invoiceNo,
+      );
+
+      _toast('Payment confirmed successfully.');
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      _toast(e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _payingBillKey = null);
+    }
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
@@ -306,82 +192,166 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.white,
-      appBar: _buildAppBar(),
+      appBar: AppAppBar(
+        title: Text(
+          'Pay Now',
+          style: AppTypography.raleway(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: AppColors.white,
+          ),
+        ),
+        centerTitle: true,
+        actions: const [
+          AppBarIconBadge(icon: Icons.payments_outlined),
+        ],
+      ),
       body: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: AppColors.primaryRed),
             )
-          : _errorMessage != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+          : RefreshIndicator(
+              color: AppColors.primaryRed,
+              onRefresh: _load,
+              child: _errorMessage != null
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          size: 48,
-                          color: AppColors.greyText,
+                        SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.35,
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          _errorMessage!,
-                          textAlign: TextAlign.center,
-                          style: AppTypography.roboto(
-                            fontSize: 14,
-                            color: AppColors.greyText,
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Text(
+                              _errorMessage!,
+                              textAlign: TextAlign.center,
+                              style: AppTypography.roboto(
+                                fontSize: 14,
+                                color: AppColors.greyText,
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: _loadSummary,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.deepRed,
-                            foregroundColor: AppColors.white,
-                          ),
-                          child: const Text('Retry'),
                         ),
                       ],
-                    ),
-                  ),
-                )
-              : RefreshIndicator(
-                  color: AppColors.primaryRed,
-                  onRefresh: _loadSummary,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(
-                      parent: BouncingScrollPhysics(),
-                    ),
-                    children: [
-                      _buildSummaryCard(_summary!),
-                      _buildInfoBanner(),
-                      _buildTabSelector(_summary!),
-                      _buildBillList(),
-                    ],
-                  ),
-                ),
+                    )
+                  : _buildBody(),
+            ),
+    );
+  }
+
+  Widget _buildBody() {
+    final summary = _summary!;
+    final pending = summary.pendingBills;
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+      children: [
+        _PendingSummaryCard(summary: summary),
+        const SizedBox(height: 20),
+        Text(
+          'Pending bills',
+          style: AppTypography.raleway(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: AppColors.darkText,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          pending.isEmpty
+              ? 'No outstanding balance right now.'
+              : 'Select a bill to open checkout and confirm payment.',
+          style: AppTypography.roboto(
+            fontSize: 12,
+            color: AppColors.greyText,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (pending.isEmpty)
+          _EmptyHint(
+            icon: Icons.check_circle_outline,
+            message: 'You are all settled up.',
+          )
+        else
+          ...pending.map(
+            (bill) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _PendingBillTile(
+                bill: bill,
+                isPaying: _payingBillKey == bill.billId.hashCode,
+                onPay: () => _payBill(bill),
+              ),
+            ),
+          ),
+        const SizedBox(height: 18),
+        Text(
+          'Online payments',
+          style: AppTypography.raleway(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: AppColors.darkText,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Checkout payments started from this app',
+          style: AppTypography.roboto(
+            fontSize: 12,
+            color: AppColors.greyText,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_onlineHistory.isEmpty)
+          const _EmptyHint(
+            icon: Icons.receipt_long_outlined,
+            message: 'No online payment intents yet.',
+          )
+        else
+          ..._onlineHistory.map(
+            (intent) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _OnlinePaymentTile(intent: intent, paidGreen: _paidGreen),
+            ),
+          ),
+      ],
     );
   }
 }
 
-class _SummaryMetric extends StatelessWidget {
-  final String label;
-  final String value;
+class _PendingSummaryCard extends StatelessWidget {
+  final BillingPaymentSummary summary;
 
-  const _SummaryMetric({
-    required this.label,
-    required this.value,
-  });
+  const _PendingSummaryCard({required this.summary});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.primaryRed, AppColors.deepRed],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.deepRed.withValues(alpha: 0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label,
+            'Amount due',
             style: AppTypography.roboto(
               fontSize: 12,
               color: AppColors.white.withValues(alpha: 0.82),
@@ -389,11 +359,20 @@ class _SummaryMetric extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            value,
+            formatBillingCurrency(summary.totalPendingAmount),
             style: AppTypography.montserrat(
-              fontSize: 15,
+              fontSize: 26,
               fontWeight: FontWeight.w700,
               color: AppColors.white,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '${summary.pendingBillCount} pending · '
+            '${summary.paidBillCount} paid',
+            style: AppTypography.roboto(
+              fontSize: 12,
+              color: AppColors.white.withValues(alpha: 0.85),
             ),
           ),
         ],
@@ -402,248 +381,217 @@ class _SummaryMetric extends StatelessWidget {
   }
 }
 
-class _TabChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+class _PendingBillTile extends StatelessWidget {
+  final PatientReport bill;
+  final bool isPaying;
+  final VoidCallback onPay;
 
-  const _TabChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
+  const _PendingBillTile({
+    required this.bill,
+    required this.isPaying,
+    required this.onPay,
   });
+
+  double get _amount {
+    if (bill.balanceAmount != null && bill.balanceAmount! > 0) {
+      return bill.balanceAmount!;
+    }
+    return bill.amount;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return TapFeedback(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: AppColors.shadow.withValues(alpha: 0.06),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: AppTypography.roboto(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: selected ? AppColors.primaryRed : AppColors.greyText,
-          ),
-        ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.fieldBorder),
       ),
-    );
-  }
-}
-
-class _PaymentBillTile extends StatelessWidget {
-  final PatientReport report;
-  final bool isPending;
-  final bool showAmount;
-  final VoidCallback onTap;
-
-  const _PaymentBillTile({
-    required this.report,
-    required this.isPending,
-    required this.showAmount,
-    required this.onTap,
-  });
-
-  String _formatDate(String raw) {
-    if (raw.isEmpty) return '--';
-    try {
-      final date = DateTime.parse(raw);
-      const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-      ];
-      return '${date.day} ${months[date.month - 1]} ${date.year}';
-    } catch (_) {
-      return raw;
-    }
-  }
-
-  double get _displayAmount {
-    if (isPending) {
-      return report.balanceAmount ?? report.amount;
-    }
-    return report.amount;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final dept = BillingDepartments.byCode(report.filterDepartmentCode);
-    final accent = dept?.gradient.first ?? AppColors.primaryRed;
-    final dateLabel = isPending
-        ? (report.visitDate?.isNotEmpty == true
-            ? 'Visit ${_formatDate(report.visitDate!)}'
-            : 'Bill #${report.billId}')
-        : 'Paid ${_formatDate(report.paymentDate)}';
-
-    return TapFeedback(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.fieldBorder),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.shadow.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppColors.softRed,
+              borderRadius: BorderRadius.circular(12),
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                dept?.icon ?? Icons.receipt_outlined,
-                color: accent,
-                size: 22,
-              ),
+            child: const Icon(
+              Icons.receipt_long_outlined,
+              color: AppColors.primaryRed,
+              size: 20,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    report.formattedDepartment,
-                    style: AppTypography.raleway(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.darkText,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Invoice ${report.invoiceNo.isNotEmpty ? report.invoiceNo : report.billId}',
-                    style: AppTypography.roboto(
-                      fontSize: 12,
-                      color: AppColors.greyText,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    dateLabel,
-                    style: AppTypography.roboto(
-                      fontSize: 12,
-                      color: AppColors.greyText,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  showAmount
-                      ? formatBillingCurrency(_displayAmount)
-                      : 'Rs. ****',
-                  style: AppTypography.montserrat(
-                    fontSize: 15,
+                  bill.formattedDepartment,
+                  style: AppTypography.raleway(
+                    fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: isPending
-                        ? const Color(0xFFC62828)
-                        : const Color(0xFF2E7D32),
+                    color: AppColors.darkText,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  bill.invoiceNo.isNotEmpty
+                      ? 'Invoice ${bill.invoiceNo}'
+                      : 'Bill ${bill.billId}',
+                  style: AppTypography.roboto(
+                    fontSize: 12,
+                    color: AppColors.greyText,
                   ),
                 ),
                 const SizedBox(height: 4),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: isPending
-                        ? AppColors.softRed
-                        : const Color(0xFFE8F5E9),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    isPending ? 'Pending' : 'Paid',
-                    style: AppTypography.roboto(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isPending
-                          ? AppColors.primaryRed
-                          : const Color(0xFF2E7D32),
-                    ),
+                Text(
+                  formatBillingCurrency(_amount),
+                  style: AppTypography.montserrat(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.deepRed,
                   ),
                 ),
               ],
             ),
-            const SizedBox(width: 4),
-            const Icon(
-              Icons.chevron_right_rounded,
-              size: 20,
-              color: AppColors.greyText,
+          ),
+          TapFeedback(
+            onTap: isPaying ? null : onPay,
+            borderRadius: BorderRadius.circular(22),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(
+                gradient: AppColors.primaryGradient,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: isPaying
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
+                  : Text(
+                      'Pay',
+                      style: AppTypography.raleway(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.white,
+                      ),
+                    ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
+class _OnlinePaymentTile extends StatelessWidget {
+  final PaymentIntent intent;
+  final Color paidGreen;
 
-  const _EmptyState({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
+  const _OnlinePaymentTile({
+    required this.intent,
+    required this.paidGreen,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
-      child: Column(
+    final isPaid = intent.isPaid;
+    final statusColor = isPaid ? paidGreen : AppColors.primaryRed;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.fieldBorder),
+      ),
+      child: Row(
         children: [
-          Icon(
-            icon,
-            size: 56,
-            color: AppColors.greyText.withValues(alpha: 0.35),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            title,
-            style: AppTypography.raleway(
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-              color: AppColors.darkText,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  intent.invoiceNo?.isNotEmpty == true
+                      ? 'Invoice ${intent.invoiceNo}'
+                      : 'Payment #${intent.paymentId}',
+                  style: AppTypography.raleway(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.darkText,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  intent.gatewayRef ?? intent.status,
+                  style: AppTypography.roboto(
+                    fontSize: 12,
+                    color: AppColors.greyText,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                formatBillingCurrency(intent.amount),
+                style: AppTypography.montserrat(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: statusColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                intent.status,
+                style: AppTypography.roboto(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: statusColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyHint extends StatelessWidget {
+  final IconData icon;
+  final String message;
+
+  const _EmptyHint({required this.icon, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.blush,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: AppColors.primaryRed, size: 28),
+          const SizedBox(height: 8),
           Text(
-            subtitle,
+            message,
             textAlign: TextAlign.center,
             style: AppTypography.roboto(
-              fontSize: 14,
+              fontSize: 13,
               color: AppColors.greyText,
             ),
           ),

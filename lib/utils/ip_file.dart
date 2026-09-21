@@ -674,7 +674,9 @@ class ApiConfig {
 
   static Future<bool> _probeFast(String base) async {
     final normalized = _normalize(base);
+    // Prefer real health endpoint; fall back to Swagger for older deploys.
     const probePaths = [
+      '/api/Health',
       '/swagger/v1/swagger.json',
       '/swagger/index.html',
       '/Swagger/index.html',
@@ -686,6 +688,11 @@ class ApiConfig {
         final response =
             await _probeClient.get(uri).timeout(fastProbeTimeout);
         if (response.statusCode == 200) return true;
+        // Health may return 503 when degraded but API host is reachable.
+        if (path == '/api/Health' &&
+            (response.statusCode == 503 || response.statusCode == 200)) {
+          return response.statusCode == 200;
+        }
       } catch (_) {}
     }
     return false;

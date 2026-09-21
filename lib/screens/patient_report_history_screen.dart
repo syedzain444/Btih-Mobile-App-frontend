@@ -1,4 +1,5 @@
 import 'package:btih_andriod_app/models/patient_report_model.dart';
+import 'package:btih_andriod_app/screens/billing/payment_screen.dart';
 import 'package:btih_andriod_app/screens/billing/recent_payments_screen.dart';
 import 'package:btih_andriod_app/screens/department_bills_screen.dart';
 import 'package:btih_andriod_app/services/billing_service.dart';
@@ -48,13 +49,19 @@ class _PatientReportHistoryScreenState extends State<PatientReportHistoryScreen>
       BillingService().invalidateHistoryCache(widget.patientMrNo);
       final history =
           await _reportService.getPatientReportHistory(widget.patientMrNo);
+
+      BillingPaymentSummary summary;
+      try {
+        summary =
+            await BillingService().getPaymentSummary(widget.patientMrNo);
+      } catch (_) {
+        summary = BillingPaymentSummary.fromReports(
+          mrNo: widget.patientMrNo,
+          reports: history,
+        );
+      }
+
       if (!mounted) return;
-
-      final summary = BillingPaymentSummary.fromReports(
-        mrNo: widget.patientMrNo,
-        reports: history,
-      );
-
       setState(() {
         allReports = history;
         _paymentSummary = summary;
@@ -70,11 +77,17 @@ class _PatientReportHistoryScreenState extends State<PatientReportHistoryScreen>
     try {
       final reports =
           await _reportService.getPatientReportHistory(widget.patientMrNo);
+      BillingPaymentSummary summary;
+      try {
+        summary =
+            await BillingService().getPaymentSummary(widget.patientMrNo);
+      } catch (_) {
+        summary = BillingPaymentSummary.fromReports(
+          mrNo: widget.patientMrNo,
+          reports: reports,
+        );
+      }
       if (!mounted) return;
-      final summary = BillingPaymentSummary.fromReports(
-        mrNo: widget.patientMrNo,
-        reports: reports,
-      );
       setState(() {
         allReports = reports;
         _paymentSummary = summary;
@@ -117,6 +130,41 @@ class _PatientReportHistoryScreenState extends State<PatientReportHistoryScreen>
         ),
       ),
     );
+  }
+
+  void _openPayNow() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PaymentScreen(
+          patientMrNo: widget.patientMrNo,
+          patientName: widget.patientName,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) _loadAll();
+    });
+  }
+
+  String _formatRecentDate(String raw) {
+    if (raw.trim().isEmpty) return '';
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return raw;
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
   }
 
   PreferredSizeWidget _buildAppBar() {
@@ -210,36 +258,60 @@ class _PatientReportHistoryScreenState extends State<PatientReportHistoryScreen>
   }
 
   Widget _buildRecentPaymentsLink() {
+    const paidGreen = Color(0xFF2E7D32);
     final summary = _paymentSummary;
-    final pendingCount = summary?.pendingBillCount ?? 0;
-    final recentCount = summary?.recentPayments.length ?? 0;
+    final latest = summary?.recentPayments.isNotEmpty == true
+        ? summary!.recentPayments.first
+        : null;
+
+    final dateLabel = latest == null
+        ? 'No payments yet'
+        : _formatRecentDate(
+            latest.paymentDate.isNotEmpty
+                ? latest.paymentDate
+                : (latest.visitDate ?? ''),
+          );
+    final deptLabel = latest?.formattedDepartment ?? '';
+    final subtitle = latest == null
+        ? 'Tap to view payment history'
+        : [
+            if (dateLabel.isNotEmpty) dateLabel,
+            if (deptLabel.isNotEmpty) deptLabel,
+          ].join(' • ');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: TapFeedback(
         onTap: summary == null ? null : _openRecentPayments,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           decoration: BoxDecoration(
             color: AppColors.white,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.fieldBorder),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.shadow.withValues(alpha: 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
+                width: 42,
+                height: 42,
+                decoration: const BoxDecoration(
                   color: AppColors.softRed,
-                  borderRadius: BorderRadius.circular(12),
+                  shape: BoxShape.circle,
                 ),
                 child: const Icon(
-                  Icons.payments_outlined,
+                  Icons.history_rounded,
                   color: AppColors.primaryRed,
-                  size: 20,
+                  size: 22,
                 ),
               ),
               const SizedBox(width: 12),
@@ -257,7 +329,9 @@ class _PatientReportHistoryScreenState extends State<PatientReportHistoryScreen>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$pendingCount pending · $recentCount recent',
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: AppTypography.roboto(
                         fontSize: 12,
                         color: AppColors.greyText,
@@ -266,15 +340,45 @@ class _PatientReportHistoryScreenState extends State<PatientReportHistoryScreen>
                   ],
                 ),
               ),
+              if (latest != null) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      formatBillingCurrency(latest.amount),
+                      style: AppTypography.montserrat(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: paidGreen,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Paid',
+                      style: AppTypography.roboto(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: paidGreen,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  width: 1,
+                  height: 32,
+                  color: AppColors.fieldBorder,
+                ),
+                const SizedBox(width: 10),
+              ],
               Text(
-                'View',
+                'View All',
                 style: AppTypography.raleway(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: AppColors.primaryRed,
                 ),
               ),
-              const SizedBox(width: 2),
               const Icon(
                 Icons.chevron_right_rounded,
                 color: AppColors.primaryRed,
@@ -307,7 +411,9 @@ class _PatientReportHistoryScreenState extends State<PatientReportHistoryScreen>
                 children: [
                   BillingAmountCard(
                     billCount: allReports.length,
-                    totalAmount: _grandTotal,
+                    totalAmount:
+                        _paymentSummary?.totalPaidAmount ?? _grandTotal,
+                    onPayNow: _openPayNow,
                   ),
                   _buildRecentPaymentsLink(),
                   _buildSectionLabel(

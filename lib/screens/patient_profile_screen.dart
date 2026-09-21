@@ -190,8 +190,6 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
     };
     final body = jsonEncode(payload);
     final profileUri = Uri.parse('${ApiConfig.baseUrl}/api/Patient/profile');
-    final legacyUri =
-        Uri.parse('${ApiConfig.baseUrl}/api/Patient/updateProfile');
 
     // POST first — many hospital IIS servers block PUT (HTTP 405).
     var response = await ApiConfig.client.post(
@@ -206,25 +204,6 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
         profileUri,
         headers: headers,
         body: body,
-      );
-      if (response.statusCode == 200) return response;
-    }
-
-    if (response.statusCode == 404 || response.statusCode == 405) {
-      final legacyPayload = {
-        'mrNo': payload['mrNo'],
-        'firstName': payload['firstName'],
-        'lastName': payload['lastName'],
-        'contactNo': payload['contactNo'],
-        'email': payload['emailAddress'],
-        'cnic': payload['cnic'],
-        'bloodGroup': payload['bloodGroup'],
-        'gender': payload['gender'],
-      };
-      response = await ApiConfig.client.post(
-        legacyUri,
-        headers: headers,
-        body: jsonEncode(legacyPayload),
       );
     }
 
@@ -285,8 +264,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
         body.startsWith('<HTML')) {
       if (statusCode == 405) {
         return 'Profile update was blocked (HTTP 405 — method not allowed). '
-            'The server may not accept PUT/POST on this URL. '
-            'Contact IT to enable POST on /api/Patient/profile or /api/Patient/updateProfile.';
+            'Contact IT to enable POST or PUT on /api/Patient/profile.';
       }
       if (statusCode == 404) {
         return 'Profile update endpoint not found.\n\n'
@@ -692,8 +670,8 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
         compressQuality: 88,
         uiSettings: [
           AndroidUiSettings(
-            toolbarTitle: 'Adjust photo',
-            toolbarColor: AppColors.deepRed,
+            toolbarTitle: 'Adjust Photo',
+            toolbarColor: AppColors.primaryRed,
             toolbarWidgetColor: AppColors.white,
             activeControlsWidgetColor: AppColors.primaryRed,
             initAspectRatio: CropAspectRatioPreset.square,
@@ -702,7 +680,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
             cropStyle: CropStyle.circle,
           ),
           IOSUiSettings(
-            title: 'Adjust photo',
+            title: 'Adjust Photo',
             aspectRatioLockEnabled: false,
             resetAspectRatioEnabled: true,
             cropStyle: CropStyle.circle,
@@ -727,7 +705,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
         _localPreviewFile = null;
         _photoBusy = false;
       });
-      CustomMessageDialog.showSuccess(context, 'Profile photo updated');
+      CustomMessageDialog.showSuccess(context, 'Profile Photo Updated');
     } catch (e) {
       if (!mounted) return;
       setState(() => _photoBusy = false);
@@ -749,7 +727,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
         _localPreviewFile = null;
         _photoBusy = false;
       });
-      CustomMessageDialog.showSuccess(context, 'Profile photo removed');
+      CustomMessageDialog.showSuccess(context, 'Profile Photo Removed');
     } catch (e) {
       if (!mounted) return;
       setState(() => _photoBusy = false);

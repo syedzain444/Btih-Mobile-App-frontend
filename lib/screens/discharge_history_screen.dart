@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'package:syncfusion_flutter_core/theme.dart';
 
 enum DischargeSortOrder { latestFirst, oldestFirst }
 
@@ -539,12 +540,17 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
           ),
           body: ColoredBox(
             color: AppColors.white,
-            child: SfPdfViewer.file(
-              File(filePath),
-              pageLayoutMode: PdfPageLayoutMode.single,
-              canShowScrollHead: true,
-              canShowScrollStatus: true,
-              enableDoubleTapZooming: true,
+            child: SfPdfViewerTheme(
+              data: const SfPdfViewerThemeData(
+                backgroundColor: AppColors.white,
+              ),
+              child: SfPdfViewer.file(
+                File(filePath),
+                pageLayoutMode: PdfPageLayoutMode.single,
+                canShowScrollHead: true,
+                canShowScrollStatus: true,
+                enableDoubleTapZooming: true,
+              ),
             ),
           ),
         ),

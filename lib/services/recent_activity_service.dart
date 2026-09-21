@@ -141,6 +141,27 @@ class RecentActivityService {
     }
   }
 
+  /// Clears server + local recent activity for the logged-in patient.
+  Future<void> clearAll([String? scopeId]) async {
+    final mrNo = _resolvedMrNo(scopeId);
+    if (mrNo != null) {
+      try {
+        final uri = Uri.parse('${ApiConfig.baseUrl}/api/RecentActivity')
+            .replace(queryParameters: {'mrNo': mrNo});
+        await ApiConfig.client
+            .delete(uri)
+            .timeout(ApiConfig.requestTimeout);
+      } catch (_) {}
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_deviceKey);
+    final scope = scopeId?.trim();
+    if (scope != null && scope.isNotEmpty) {
+      await prefs.remove('$_legacyPrefix$scope');
+    }
+  }
+
   Future<List<RecentActivityItem>> _getLocalActivities([String? scopeId]) async {
     final prefs = await SharedPreferences.getInstance();
     var raw = prefs.getString(_deviceKey);

@@ -233,7 +233,7 @@ class DatabaseHelper {
     return {
       'id': item.id,
       'mrNo': mrNo,
-      'type': item.type.name,
+      'type': item.type.wireValue,
       'category': item.category.name,
       'priority': item.priority.name,
       'title': item.title,
@@ -257,28 +257,14 @@ class DatabaseHelper {
       } catch (_) {}
     }
 
-    NotificationType type;
-    try {
-      type = NotificationType.values.byName(row['type']?.toString() ?? '');
-    } catch (_) {
-      type = NotificationType.hospitalAnnouncement;
-    }
-
-    NotificationCategory category;
-    try {
-      category =
-          NotificationCategory.values.byName(row['category']?.toString() ?? '');
-    } catch (_) {
-      category = NotificationCategory.general;
-    }
-
-    NotificationPriority priority;
-    try {
-      priority =
-          NotificationPriority.values.byName(row['priority']?.toString() ?? '');
-    } catch (_) {
-      priority = NotificationPriority.normal;
-    }
+    final type = NotificationTypeX.fromWire(row['type']?.toString() ?? '');
+    final category = NotificationCategoryX.fromWire(
+      row['category']?.toString() ?? '',
+      fallbackType: type,
+    );
+    final priority = NotificationPriorityX.fromWire(
+      row['priority']?.toString() ?? 'normal',
+    );
 
     return AppNotification(
       id: row['id']?.toString() ?? '',

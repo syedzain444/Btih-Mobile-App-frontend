@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'package:syncfusion_flutter_core/theme.dart';
 
 class BillingPdfService {
   BillingPdfService._();
@@ -219,7 +220,12 @@ class BillingPdfService {
             ),
             body: ColoredBox(
               color: AppColors.white,
-              child: SfPdfViewer.memory(Uint8List.fromList(bytes)),
+              child: SfPdfViewerTheme(
+                data: const SfPdfViewerThemeData(
+                  backgroundColor: AppColors.white,
+                ),
+                child: SfPdfViewer.memory(Uint8List.fromList(bytes)),
+              ),
             ),
           ),
         ),

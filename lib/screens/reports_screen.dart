@@ -1108,6 +1108,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
@@ -2062,12 +2063,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
           body: ColoredBox(
             color: AppColors.white,
-            child: SfPdfViewer.file(
-              File(filePath),
-              pageLayoutMode: PdfPageLayoutMode.single,
-              canShowScrollHead: true,
-              canShowScrollStatus: true,
-              enableDoubleTapZooming: true,
+            child: SfPdfViewerTheme(
+              data: const SfPdfViewerThemeData(
+                backgroundColor: AppColors.white,
+              ),
+              child: SfPdfViewer.file(
+                File(filePath),
+                pageLayoutMode: PdfPageLayoutMode.single,
+                canShowScrollHead: true,
+                canShowScrollStatus: true,
+                enableDoubleTapZooming: true,
+              ),
             ),
           ),
         ),

@@ -98,10 +98,19 @@ class NotificationService extends ChangeNotifier {
     }
 
     try {
-      final inbox = await _api.getInbox(
-        mrNo: normalizedMrNo,
-        pageSize: 100,
-      );
+      // Prefer server-grouped inbox for the categorized notifications screen.
+      NotificationInboxResult inbox;
+      try {
+        inbox = await _api.getInboxGrouped(
+          mrNo: normalizedMrNo,
+          pageSize: 100,
+        );
+      } catch (_) {
+        inbox = await _api.getInbox(
+          mrNo: normalizedMrNo,
+          pageSize: 100,
+        );
+      }
       _notifications = inbox.notifications;
       _serverUnreadCount = inbox.unreadCount;
       _syncedFromServer = true;
@@ -217,86 +226,12 @@ class NotificationService extends ChangeNotifier {
             data['notificationType'] ??
             data['event'] ??
             title)
-        .toString()
-        .toLowerCase();
-
-    if (rawType.contains('appointment') && rawType.contains('remind')) {
-      return (
-        type: NotificationType.appointmentReminder,
-        category: NotificationCategory.appointments,
-        priority: NotificationPriority.high,
-      );
-    }
-    if (rawType.contains('appointment') && rawType.contains('cancel')) {
-      return (
-        type: NotificationType.appointmentCancelled,
-        category: NotificationCategory.appointments,
-        priority: NotificationPriority.high,
-      );
-    }
-    if (rawType.contains('appointment') && rawType.contains('confirm')) {
-      return (
-        type: NotificationType.appointmentConfirmed,
-        category: NotificationCategory.appointments,
-        priority: NotificationPriority.high,
-      );
-    }
-    if (rawType.contains('appointment')) {
-      return (
-        type: NotificationType.appointmentReminder,
-        category: NotificationCategory.appointments,
-        priority: NotificationPriority.high,
-      );
-    }
-    if (rawType.contains('lab')) {
-      return (
-        type: NotificationType.labReportAvailable,
-        category: NotificationCategory.lab,
-        priority: NotificationPriority.high,
-      );
-    }
-    if (rawType.contains('gastro')) {
-      return (
-        type: NotificationType.gastroReportAvailable,
-        category: NotificationCategory.records,
-        priority: NotificationPriority.normal,
-      );
-    }
-    if (rawType.contains('radio')) {
-      return (
-        type: NotificationType.radiologyReportAvailable,
-        category: NotificationCategory.records,
-        priority: NotificationPriority.normal,
-      );
-    }
-    if (rawType.contains('report')) {
-      return (
-        type: NotificationType.labReportAvailable,
-        category: NotificationCategory.lab,
-        priority: NotificationPriority.high,
-      );
-    }
-    if (rawType.contains('payment') || rawType.contains('bill')) {
-      return (
-        type: NotificationType.paymentPending,
-        category: NotificationCategory.billing,
-        priority: NotificationPriority.high,
-      );
-    }
-    if (rawType.contains('medication') || rawType.contains('prescription')) {
-      return (
-        type: rawType.contains('prescription')
-            ? NotificationType.prescriptionAdded
-            : NotificationType.medicationReminder,
-        category: NotificationCategory.medications,
-        priority: NotificationPriority.high,
-      );
-    }
-
+        .toString();
+    final type = NotificationTypeX.fromWire(rawType);
     return (
-      type: NotificationType.hospitalAnnouncement,
-      category: NotificationCategory.general,
-      priority: NotificationPriority.normal,
+      type: type,
+      category: type.defaultCategory,
+      priority: type.defaultPriority,
     );
   }
 
@@ -646,37 +581,246 @@ class NotificationService extends ChangeNotifier {
     );
   }
 
+  Future<void> notifyAppointmentRequestReceived({
+    required String mrNo,
+    required String doctorName,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.appointmentRequestReceived,
+      category: NotificationCategory.appointments,
+      priority: NotificationPriority.normal,
+      title: 'Appointment Request Received',
+      body: 'We received your appointment request with $doctorName.',
+      payload: {'doctorName': doctorName},
+    );
+  }
+
+  Future<void> notifyDischargeSummaryReady({
+    required String mrNo,
+    String? visitLabel,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.dischargeSummaryReady,
+      category: NotificationCategory.records,
+      priority: NotificationPriority.high,
+      title: 'Discharge Summary Ready',
+      body: visitLabel == null
+          ? 'Your discharge summary is now available.'
+          : 'Your discharge summary for $visitLabel is now available.',
+      payload: ifNotEmpty({'visitLabel': visitLabel}),
+    );
+  }
+
+  Future<void> notifyVisitSummaryReady({
+    required String mrNo,
+    String? visitLabel,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.visitSummaryReady,
+      category: NotificationCategory.records,
+      priority: NotificationPriority.normal,
+      title: 'Visit Summary Ready',
+      body: visitLabel == null
+          ? 'A new visit summary is available in your history.'
+          : 'Visit summary for $visitLabel is available.',
+      payload: ifNotEmpty({'visitLabel': visitLabel}),
+    );
+  }
+
+  Future<void> notifyMedicationScheduleUpdated({
+    required String mrNo,
+    String? medicineName,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.medicationScheduleUpdated,
+      category: NotificationCategory.medications,
+      priority: NotificationPriority.normal,
+      title: 'Medication Schedule Updated',
+      body: medicineName == null
+          ? 'Your medication schedule has been updated.'
+          : 'Your schedule for $medicineName has been updated.',
+      payload: ifNotEmpty({'medicineName': medicineName}),
+    );
+  }
+
+  Future<void> notifyBillGenerated({
+    required String mrNo,
+    String? amount,
+    String? billLabel,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.billGenerated,
+      category: NotificationCategory.billing,
+      priority: NotificationPriority.high,
+      title: 'New Bill Generated',
+      body: amount != null
+          ? 'A new bill of $amount has been added to your account.'
+          : 'A new bill is available in Billing.',
+      payload: {
+        if (amount != null) 'amount': amount,
+        if (billLabel != null) 'billLabel': billLabel,
+      },
+    );
+  }
+
+  Future<void> notifyMessageReceived({
+    required String mrNo,
+    String? senderName,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.messageReceived,
+      category: NotificationCategory.messaging,
+      priority: NotificationPriority.high,
+      title: 'New Message',
+      body: senderName == null
+          ? 'You have a new message from the hospital.'
+          : 'New message from $senderName.',
+      payload: ifNotEmpty({'senderName': senderName}),
+    );
+  }
+
+  Future<void> notifyMessageThreadClosed({
+    required String mrNo,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.messageThreadClosed,
+      category: NotificationCategory.messaging,
+      priority: NotificationPriority.low,
+      title: 'Conversation Closed',
+      body: 'A support conversation has been closed.',
+    );
+  }
+
+  Future<void> notifyProfileUpdated({required String mrNo}) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.profileUpdated,
+      category: NotificationCategory.security,
+      priority: NotificationPriority.normal,
+      title: 'Profile Updated',
+      body: 'Your profile details were updated successfully.',
+    );
+  }
+
+  Future<void> notifyPasswordChanged({required String mrNo}) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.passwordChanged,
+      category: NotificationCategory.security,
+      priority: NotificationPriority.high,
+      title: 'Password Changed',
+      body: 'Your account password was changed. If this was not you, contact support.',
+    );
+  }
+
+  Future<void> notifyAppPinChanged({required String mrNo}) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.appPinChanged,
+      category: NotificationCategory.security,
+      priority: NotificationPriority.normal,
+      title: 'App PIN Updated',
+      body: 'Your app lock PIN was set or changed on this device.',
+    );
+  }
+
+  Future<void> notifyTrustedDeviceAdded({
+    required String mrNo,
+    String? deviceLabel,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.trustedDeviceAdded,
+      category: NotificationCategory.security,
+      priority: NotificationPriority.normal,
+      title: 'Trusted Device Added',
+      body: deviceLabel == null
+          ? 'A new device was marked as trusted for your account.'
+          : '$deviceLabel was marked as a trusted device.',
+      payload: ifNotEmpty({'deviceLabel': deviceLabel}),
+    );
+  }
+
+  Future<void> notifyTrustedDeviceRemoved({
+    required String mrNo,
+    String? deviceLabel,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.trustedDeviceRemoved,
+      category: NotificationCategory.security,
+      priority: NotificationPriority.normal,
+      title: 'Trusted Device Removed',
+      body: deviceLabel == null
+          ? 'A trusted device was removed from your account.'
+          : '$deviceLabel is no longer a trusted device.',
+      payload: ifNotEmpty({'deviceLabel': deviceLabel}),
+    );
+  }
+
+  Future<void> notifyNewLoginAlert({
+    required String mrNo,
+    String? deviceLabel,
+  }) {
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.newLoginAlert,
+      category: NotificationCategory.security,
+      priority: NotificationPriority.high,
+      title: 'New Login Detected',
+      body: deviceLabel == null
+          ? 'Your account was signed in on a new device.'
+          : 'Your account was signed in on $deviceLabel.',
+      payload: ifNotEmpty({'deviceLabel': deviceLabel}),
+    );
+  }
+
   static String formatRelativeTime(DateTime dateTime) {
+    final local = dateTime.toLocal();
     final now = DateTime.now();
-    final difference = now.difference(dateTime);
+    final difference = now.difference(local);
 
     if (difference.inMinutes < 1) return 'Just now';
     if (difference.inMinutes < 60) {
       final minutes = difference.inMinutes;
       return '$minutes minute${minutes == 1 ? '' : 's'} ago';
     }
-    if (_isSameDay(now, dateTime)) {
+    if (_isSameDay(now, local)) {
       final hours = difference.inHours;
-      return '$hours hour${hours == 1 ? '' : 's'} ago';
+      return '$hours hour${hours == 1 ? '' : 's'} ago · ${_formatClock(local)}';
     }
 
     final yesterday = DateTime(now.year, now.month, now.day - 1);
-    if (_isSameDay(yesterday, dateTime)) {
-      return 'Yesterday, ${_formatClock(dateTime)}';
+    if (_isSameDay(yesterday, local)) {
+      return 'Yesterday, ${_formatClock(local)}';
     }
 
+    return formatAbsoluteDateTime(local);
+  }
+
+  /// Absolute date/time for inbox rows, e.g. "19 Sep 2026, 03:27 PM".
+  static String formatAbsoluteDateTime(DateTime dateTime) {
+    final local = dateTime.toLocal();
     const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    return '${dateTime.day} ${months[dateTime.month - 1]}';
+    return '${local.day} ${months[local.month - 1]} ${local.year}, ${_formatClock(local)}';
   }
 
   static String groupLabelFor(DateTime dateTime) {
     final now = DateTime.now();
-    if (_isSameDay(now, dateTime)) return 'Today';
+    final local = dateTime.toLocal();
+    if (_isSameDay(now, local)) return 'Today';
     final yesterday = DateTime(now.year, now.month, now.day - 1);
-    if (_isSameDay(yesterday, dateTime)) return 'Yesterday';
+    if (_isSameDay(yesterday, local)) return 'Yesterday';
     return 'Earlier';
   }
 
@@ -702,7 +846,7 @@ class NotificationService extends ChangeNotifier {
           mrNo: normalizedMrNo,
           title: title,
           body: body,
-          notificationType: type.name,
+          notificationType: type.wireValue,
           category: category.name,
           priority: priority.name,
           payload: payload,
