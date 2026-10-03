@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:btih_andriod_app/services/report_pdf_cache_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -11,11 +12,7 @@ class SecurityCacheService {
 
     if (!kIsWeb) {
       deleted += await _clearDirectory(await getTemporaryDirectory());
-      final docs = await getApplicationDocumentsDirectory();
-      deleted += await _clearDirectory(
-        Directory('${docs.path}/BTIHReports'),
-        removeDir: false,
-      );
+      deleted += await ReportPdfCacheService.clearAll();
     }
 
     return deleted;

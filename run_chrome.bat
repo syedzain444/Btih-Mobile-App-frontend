@@ -1,3 +1,3 @@
 @echo off
-REM Shortcut — same as run_chrome_local_dev.bat (starts API if needed).
-call "%~dp0..\run-dev.bat" chrome
+REM Deprecated — use RUN.bat option 5.
+call "%~dp0..\RUN.bat"

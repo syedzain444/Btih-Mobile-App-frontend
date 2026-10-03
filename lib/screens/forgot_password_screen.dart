@@ -7,12 +7,10 @@ import 'package:btih_andriod_app/utils/auth_validation.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:btih_andriod_app/widgets/login_wave_header.dart';
+import 'package:btih_andriod_app/widgets/otp_autofill_field.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:sms_autofill/sms_autofill.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({
@@ -35,9 +33,10 @@ class ForgotPasswordScreen extends StatefulWidget {
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
 }
 
-class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAutoFill {
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _phoneController = TextEditingController();
   final _otpController = TextEditingController();
+  final _otpFocusNode = FocusNode();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _authService = AuthService();
@@ -61,36 +60,20 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
     if (phone != null && phone.isNotEmpty) {
       _phoneController.text = phone;
     }
-    _listenForSmsOtp();
   }
 
-  void _listenForSmsOtp() {
-    if (kIsWeb) return;
-    try {
-      listenForCode();
-    } catch (_) {
-      // SMS auto-read is best-effort; manual entry still works.
-    }
-  }
-
-  @override
-  void codeUpdated() {
-    final received = code?.trim();
-    if (received == null || received.length != 6) return;
-
-    _otpController.text = received;
-    if (mounted) {
-      setState(() {});
-    }
+  void _prepareOtpAutofill() {
+    unawaited(ensureSmsOtpListening());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _otpFocusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
-    if (!kIsWeb) {
-      cancel();
-    }
     _phoneController.dispose();
     _otpController.dispose();
+    _otpFocusNode.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     _timer?.cancel();
@@ -131,7 +114,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
       );
 
       if (_step >= 2) {
-        _listenForSmsOtp();
+        _prepareOtpAutofill();
       }
 
       if (showSuccessDialog) {
@@ -185,7 +168,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
       if (!mounted || !otpSent) return;
 
       setState(() => _step = 2);
-      _listenForSmsOtp();
+      _prepareOtpAutofill();
     } on AuthApiException catch (e) {
       if (!mounted) return;
       CustomMessageDialog.showError(context, e.message);
@@ -250,16 +233,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
   }
 
   Future<void> _updatePassword() async {
-    final newPassword = _newPasswordController.text.trim();
-    final confirmPassword = _confirmPasswordController.text.trim();
+    final newPassword = _newPasswordController.text;
+    final confirmPassword = _confirmPasswordController.text;
 
     final passwordError = AuthValidation.validatePassword(newPassword);
     if (passwordError != null) {
       CustomMessageDialog.showError(context, passwordError);
       return;
     }
-    if (newPassword != confirmPassword) {
-      CustomMessageDialog.showError(context, 'Passwords do not match');
+    final matchError =
+        AuthValidation.validateConfirmPassword(newPassword, confirmPassword);
+    if (matchError != null) {
+      CustomMessageDialog.showError(context, matchError);
       return;
     }
     if (_verifiedMrNo == null || _verifiedMrNo!.isEmpty) {
@@ -272,7 +257,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
       final response = await _authService.updatePassword(
         mrno: _verifiedMrNo!,
         patientPassword: newPassword,
-        contactNo: _phoneController.text.trim(),
+        contactNo: AuthValidation.normalizePakistanPhone(
+          _phoneController.text.trim(),
+        ),
       );
       if (!mounted) return;
       CustomMessageDialog.showSuccess(
@@ -385,26 +372,23 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
                     ),
                   ],
                   if (_step == 2) ...[
-                    AutofillGroup(
-                      child: TextField(
-                        controller: _otpController,
-                        keyboardType: TextInputType.number,
-                        maxLength: 6,
-                        enabled: !_isVerifyingOtp,
-                        autofillHints: const [AutofillHints.oneTimeCode],
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        textAlign: TextAlign.center,
-                        style: AppTypography.roboto(
-                          fontSize: 22,
-                          letterSpacing: 8,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.darkText,
-                        ),
-                        decoration: authUnderlineFieldDecoration(
-                          hint: '000000',
-                          counterText: '',
-                        ),
+                    Text(
+                      'Tap the code above your keyboard when the SMS arrives, or type it manually.',
+                      textAlign: TextAlign.center,
+                      style: AppTypography.roboto(
+                        fontSize: 12,
+                        color: AppColors.greyText,
+                        height: 1.35,
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    OtpAutofillField(
+                      controller: _otpController,
+                      focusNode: _otpFocusNode,
+                      enabled: !_isVerifyingOtp,
+                      onCompleted: (_) {
+                        if (!_isVerifyingOtp) unawaited(_verifyOtp());
+                      },
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -464,7 +448,16 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with CodeAu
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 8),
+                    Text(
+                      AuthValidation.passwordPolicySummary,
+                      style: AppTypography.roboto(
+                        fontSize: 11,
+                        color: AppColors.greyText,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     TextField(
                       controller: _confirmPasswordController,
                       obscureText: _obscureConfirm,

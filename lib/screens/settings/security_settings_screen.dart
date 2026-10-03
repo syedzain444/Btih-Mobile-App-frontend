@@ -11,6 +11,7 @@ import 'package:btih_andriod_app/services/security_preferences_service.dart';
 import 'package:btih_andriod_app/services/trusted_device_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
+import 'package:btih_andriod_app/utils/auth_validation.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
 import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/app_bar_icon_badge.dart';
@@ -280,26 +281,22 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     final current = _currentPasswordController.text;
     final next = _newPasswordController.text;
     final confirm = _confirmPasswordController.text;
-    final contact = (_registeredMobile ?? '').trim();
+    final contact = AuthValidation.normalizePakistanPhone(
+      (_registeredMobile ?? '').trim(),
+    );
 
     if (contact.isEmpty) {
       _showMessage('Registered mobile number is required to change password');
       return;
     }
-    if (current.isEmpty || next.isEmpty || confirm.isEmpty) {
-      _showMessage('Please fill in all password fields');
-      return;
-    }
-    if (next.length < 6) {
-      _showMessage('New password must be at least 6 characters');
-      return;
-    }
-    if (next != confirm) {
-      _showMessage('New password and confirm password do not match');
-      return;
-    }
-    if (current == next) {
-      _showMessage('New password must be different from current password');
+
+    final validationError = AuthValidation.validatePasswordChange(
+      currentPassword: current,
+      newPassword: next,
+      confirmPassword: confirm,
+    );
+    if (validationError != null) {
+      _showMessage(validationError);
       return;
     }
 
@@ -555,6 +552,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                         obscure: _obscureNew,
                         onToggle: () =>
                             setState(() => _obscureNew = !_obscureNew),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      AuthValidation.passwordPolicySummary,
+                      style: AppTypography.roboto(
+                        fontSize: 11,
+                        color: AppColors.greyText,
+                        height: 1.35,
                       ),
                     ),
                     const SizedBox(height: 10),

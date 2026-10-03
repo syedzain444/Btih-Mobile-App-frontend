@@ -5,6 +5,7 @@ import 'package:btih_andriod_app/models/discharge_history_model.dart';
 import 'package:btih_andriod_app/services/discharge_history_service.dart';
 import 'package:btih_andriod_app/services/discharge_report_service.dart';
 import 'package:btih_andriod_app/services/recent_activity_service.dart';
+import 'package:btih_andriod_app/services/report_pdf_cache_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/dashboard_helpers.dart';
@@ -14,7 +15,6 @@ import 'package:btih_andriod_app/widgets/app_app_bar.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_core/theme.dart';
@@ -326,7 +326,19 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
         bytes[3] == 0x46;
   }
 
+  String _dischargeCacheKey(DischargeRecord record) {
+    return ReportPdfCacheService.buildKey(
+      rptId: '35',
+      reportName: 'DISCHARGE',
+      parameters: record.patienT_VISIT_ID.toString(),
+    );
+  }
+
   Future<List<int>> _fetchDischargePdfBytes(DischargeRecord record) async {
+    final cacheKey = _dischargeCacheKey(record);
+    final cached = await ReportPdfCacheService.getCachedBytes(cacheKey);
+    if (cached != null) return cached;
+
     final response = await _reportService.generateDischargeReport(
       patientVisitId: record.patienT_VISIT_ID,
       empId: 0,
@@ -334,12 +346,17 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
     );
 
     final contentType = response.headers.value('content-type');
-    if (!_looksLikePdf(response.data) &&
+    final data = response.data;
+    if (!_looksLikePdf(data) &&
         (contentType == null || !contentType.contains('application/pdf'))) {
       throw Exception('Server did not return a valid PDF');
     }
 
-    return response.data;
+    final bytes = data is Uint8List
+        ? data
+        : Uint8List.fromList(List<int>.from(data as List));
+    await ReportPdfCacheService.putBytes(cacheKey: cacheKey, bytes: bytes);
+    return bytes;
   }
 
   Widget _buildLoadingDialog({
@@ -424,11 +441,14 @@ class _DischargeHistoryScreenState extends State<DischargeHistoryScreen> {
 
     try {
       final bytes = await _fetchDischargePdfBytes(record);
-      final dir = await getApplicationDocumentsDirectory();
       final fileName = _dischargeFileName(record);
-      final filePath = '${dir.path}/$fileName';
-      final file = File(filePath);
-      await file.writeAsBytes(bytes, flush: true);
+      final cacheKey = _dischargeCacheKey(record);
+      final cachedFile = await ReportPdfCacheService.getCachedFile(cacheKey);
+      final filePath = cachedFile?.path ??
+          (await ReportPdfCacheService.putBytes(
+            cacheKey: cacheKey,
+            bytes: bytes,
+          )).path;
 
       if (!mounted) return;
       if (Navigator.canPop(context)) {

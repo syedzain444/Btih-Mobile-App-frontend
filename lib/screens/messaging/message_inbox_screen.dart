@@ -1,6 +1,7 @@
 import 'package:btih_andriod_app/models/messaging_models.dart';
 import 'package:btih_andriod_app/screens/messaging/message_thread_screen.dart';
 import 'package:btih_andriod_app/screens/messaging/new_message_sheet.dart';
+import 'package:btih_andriod_app/screens/support/complaints_suggestions_screen.dart';
 import 'package:btih_andriod_app/services/messaging_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
@@ -31,6 +32,7 @@ class _MessageInboxScreenState extends State<MessageInboxScreen> {
   bool _loading = true;
   String? _error;
   String _query = '';
+  bool _showComplaintsBanner = true;
 
   @override
   void initState() {
@@ -68,6 +70,15 @@ class _MessageInboxScreenState extends State<MessageInboxScreen> {
         _error = e.toString().replaceFirst('Exception: ', '');
       });
     }
+  }
+
+  Future<void> _openComplaintsSuggestions() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ComplaintsSuggestionsScreen(),
+      ),
+    );
   }
 
   List<MessageThreadSummary> get _filteredThreads {
@@ -158,6 +169,7 @@ class _MessageInboxScreenState extends State<MessageInboxScreen> {
       body: Column(
         children: [
           _buildSearchBar(),
+          if (_showComplaintsBanner) _buildComplaintsBanner(),
           Expanded(
             child: RefreshIndicator(
               color: AppColors.primaryRed,
@@ -166,6 +178,72 @@ class _MessageInboxScreenState extends State<MessageInboxScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildComplaintsBanner() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Material(
+        color: AppColors.blush,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: _openComplaintsSuggestions,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: AppColors.softRed,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.feedback_outlined,
+                    size: 18,
+                    color: AppColors.primaryRed,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Complaints & Suggestions',
+                        style: AppTypography.raleway(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.darkText,
+                        ),
+                      ),
+                      Text(
+                        'Tap to submit feedback to hospital staff',
+                        style: AppTypography.roboto(
+                          fontSize: 11,
+                          color: AppColors.greyText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Dismiss',
+                  onPressed: () => setState(() => _showComplaintsBanner = false),
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: AppColors.greyText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -203,7 +281,7 @@ class _MessageInboxScreenState extends State<MessageInboxScreen> {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppColors.primaryRed),
+            borderSide: const BorderSide(color: AppColors.primaryRed, width: 1.4),
           ),
         ),
       ),

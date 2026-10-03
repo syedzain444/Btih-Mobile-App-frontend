@@ -1,6 +1,7 @@
 // lib/utils/database_helper.dart
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -13,11 +14,27 @@ class DatabaseHelper {
   DatabaseHelper._internal();
 
   static Database? _database;
+  static bool _unavailable = false;
 
-  Future<Database> get database async {
+  /// Native sqflite works on Android/iOS only. Web/desktop need FFI (not used).
+  static bool get isSupported {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  Future<Database?> get database async {
+    if (!isSupported || _unavailable) return null;
     if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+    try {
+      _database = await _initDatabase();
+      return _database!;
+    } catch (e, st) {
+      debugPrint('DatabaseHelper init failed (using prefs fallback): $e\n$st');
+      _unavailable = true;
+      _database = null;
+      return null;
+    }
   }
 
   Future<Database> _initDatabase() async {
@@ -79,15 +96,15 @@ class DatabaseHelper {
     );
   }
 
-  // Insert appointment
   Future<int> insertAppointment(LocalAppointment appointment) async {
-    Database db = await database;
+    final db = await database;
+    if (db == null) return 0;
     return await db.insert('appointments', appointment.toMap());
   }
 
-  // Get all guest appointments
   Future<List<LocalAppointment>> getGuestAppointments() async {
-    Database db = await database;
+    final db = await database;
+    if (db == null) return const [];
     final List<Map<String, dynamic>> maps = await db.query(
       'appointments',
       where: 'isGuestAppointment = ?',
@@ -102,7 +119,8 @@ class DatabaseHelper {
     required String status,
     String? purposeAppend,
   }) async {
-    Database db = await database;
+    final db = await database;
+    if (db == null) return 0;
     final rows = await db.query(
       'appointments',
       where: 'appointmentId = ?',
@@ -129,9 +147,9 @@ class DatabaseHelper {
     );
   }
 
-  // Delete appointment
   Future<int> deleteAppointment(int id) async {
-    Database db = await database;
+    final db = await database;
+    if (db == null) return 0;
     return await db.delete(
       'appointments',
       where: 'id = ?',
@@ -139,9 +157,9 @@ class DatabaseHelper {
     );
   }
 
-  // Delete all guest appointments (for logout)
   Future<int> deleteAllGuestAppointments() async {
-    Database db = await database;
+    final db = await database;
+    if (db == null) return 0;
     return await db.delete(
       'appointments',
       where: 'isGuestAppointment = ?',
@@ -149,9 +167,9 @@ class DatabaseHelper {
     );
   }
 
-  // Check if appointment already exists
   Future<bool> isAppointmentExists(String appointmentId) async {
-    Database db = await database;
+    final db = await database;
+    if (db == null) return false;
     final List<Map<String, dynamic>> maps = await db.query(
       'appointments',
       where: 'appointmentId = ?',
@@ -160,13 +178,12 @@ class DatabaseHelper {
     return maps.isNotEmpty;
   }
 
-  // ── Notification history (permanent on-device SQLite) ──────────────────
-
   Future<void> replaceNotificationsForMr({
     required String mrNo,
     required List<AppNotification> notifications,
   }) async {
     final db = await database;
+    if (db == null) return;
     final batch = db.batch();
     batch.delete('notifications', where: 'mrNo = ?', whereArgs: [mrNo]);
     for (final item in notifications) {
@@ -184,6 +201,7 @@ class DatabaseHelper {
     required AppNotification notification,
   }) async {
     final db = await database;
+    if (db == null) return;
     await db.insert(
       'notifications',
       _notificationToMap(mrNo, notification),
@@ -196,6 +214,7 @@ class DatabaseHelper {
     int limit = 100,
   }) async {
     final db = await database;
+    if (db == null) return const [];
     final rows = await db.query(
       'notifications',
       where: 'mrNo = ?',
@@ -211,6 +230,7 @@ class DatabaseHelper {
     required String id,
   }) async {
     final db = await database;
+    if (db == null) return;
     await db.update(
       'notifications',
       {'isRead': 1},
@@ -221,6 +241,7 @@ class DatabaseHelper {
 
   Future<void> markAllNotificationsRead(String mrNo) async {
     final db = await database;
+    if (db == null) return;
     await db.update(
       'notifications',
       {'isRead': 1},

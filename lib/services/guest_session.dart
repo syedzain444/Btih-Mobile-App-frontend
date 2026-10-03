@@ -1,4 +1,5 @@
 import 'package:btih_andriod_app/services/guest_service.dart';
+import 'package:btih_andriod_app/utils/auth_validation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Guest profile for walk-in booking (persisted locally + synced to API).
@@ -112,13 +113,6 @@ class GuestSession {
   }
 
   static String normalizePhone(String raw) {
-    var digits = raw.trim().replaceAll(RegExp(r'[\s\-]'), '');
-    if (digits.startsWith('92') && digits.length >= 12) {
-      digits = digits.substring(2);
-    }
-    if (!digits.startsWith('0') && digits.length == 10) {
-      digits = '0$digits';
-    }
-    return digits;
+    return AuthValidation.normalizePakistanPhone(raw);
   }
 }

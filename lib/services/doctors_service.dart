@@ -53,7 +53,7 @@ class DoctorService {
           if (schedule.doctorId > 0 &&
               schedule.dayName.isNotEmpty &&
               schedule.hasValidTimes) {
-            schedules.add(schedule);
+            schedules.addAll(_expandToFifteenMinuteSlots(schedule));
           }
         } catch (_) {
           // Skip malformed schedule rows instead of failing the whole response.
@@ -67,6 +67,41 @@ class DoctorService {
     }
 
     throw Exception(_errorMessage(response, 'Failed to load schedule'));
+  }
+
+  /// Ensures bookable slots are 15 minutes (expands hourly OPD windows if needed).
+  List<DoctorSchedule> _expandToFifteenMinuteSlots(DoctorSchedule schedule) {
+    const slotMinutes = 15;
+    final span = schedule.timeTo.difference(schedule.timeFrom).inMinutes;
+    if (span <= slotMinutes) {
+      return [schedule];
+    }
+
+    final slots = <DoctorSchedule>[];
+    var cursor = schedule.timeFrom;
+    var serial = schedule.serialNumber;
+    while (cursor.isBefore(schedule.timeTo)) {
+      final next = cursor.add(const Duration(minutes: slotMinutes));
+      if (next.isAfter(schedule.timeTo)) {
+        // Drop leftover shorter than a full 15-minute slot.
+        break;
+      }
+      slots.add(
+        DoctorSchedule(
+          serialNumber: serial++,
+          doctorId: schedule.doctorId,
+          doctorName: schedule.doctorName,
+          dayName: schedule.dayName,
+          timeFrom: cursor,
+          timeTo: next,
+          weekId: schedule.weekId,
+          opD_Charges: schedule.opD_Charges,
+        ),
+      );
+      cursor = next;
+    }
+
+    return slots.isEmpty ? [schedule] : slots;
   }
 
   String _errorMessage(http.Response response, String fallback) {

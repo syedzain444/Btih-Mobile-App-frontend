@@ -16,6 +16,7 @@ class GuestService {
     required String mobileNumber,
     required DateTime dateOfBirth,
     required String gender,
+    required String otp,
   }) async {
     final response = await ApiConfig.client
         .post(
@@ -29,6 +30,7 @@ class GuestService {
             'mobileNumber': GuestSession.normalizePhone(mobileNumber),
             'dateOfBirth': dateOfBirth.toIso8601String(),
             'gender': gender.trim(),
+            'otp': otp.trim(),
           }),
         )
         .timeout(ApiConfig.requestTimeout);
@@ -49,6 +51,53 @@ class GuestService {
     throw Exception(
       decoded?['message']?.toString() ??
           'Failed to save guest profile (HTTP ${response.statusCode})',
+    );
+  }
+
+  Future<Map<String, dynamic>> bookAppointment({
+    required String mobileNumber,
+    required String fullName,
+    required int doctorId,
+    required String appointmentTime,
+    String? doctorName,
+    int? departmentId,
+    int? weekId,
+    int? guestId,
+    String? purpose,
+    String? status,
+    String? hmisAppointmentId,
+  }) async {
+    final response = await ApiConfig.client
+        .post(
+          _uri('/api/Guest/appointments'),
+          headers: {
+            'accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'mobileNumber': GuestSession.normalizePhone(mobileNumber),
+            'fullName': fullName.trim(),
+            'doctorId': doctorId,
+            'appointmentTime': appointmentTime,
+            if (doctorName != null) 'doctorName': doctorName,
+            if (departmentId != null) 'departmentId': departmentId,
+            if (weekId != null) 'weekId': weekId,
+            if (guestId != null) 'guestId': guestId,
+            if (purpose != null) 'purpose': purpose,
+            if (status != null) 'status': status,
+            if (hmisAppointmentId != null) 'hmisAppointmentId': hmisAppointmentId,
+          }),
+        )
+        .timeout(ApiConfig.requestTimeout);
+
+    final decoded = _decode(response.body);
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return decoded ?? {'success': true};
+    }
+
+    throw Exception(
+      decoded?['message']?.toString() ??
+          'Failed to save guest appointment (HTTP ${response.statusCode})',
     );
   }
 

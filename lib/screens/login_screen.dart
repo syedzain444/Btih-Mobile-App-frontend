@@ -1,13 +1,14 @@
 import 'dart:async';
-import 'package:btih_andriod_app/services/guest_session.dart';
-import 'package:btih_andriod_app/utils/auth_field_decoration.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:btih_andriod_app/services/auth_exceptions.dart';
 import 'package:btih_andriod_app/services/auth_service.dart';
 import 'package:btih_andriod_app/services/auth_session.dart';
+import 'package:btih_andriod_app/services/login_flow_persistence.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
+import 'package:btih_andriod_app/widgets/otp_autofill_field.dart';
 import 'package:btih_andriod_app/screens/patient_main_shell.dart';
 import '../theme/app_typography.dart';
 import '../utils/auth_validation.dart';
@@ -16,7 +17,6 @@ import 'package:btih_andriod_app/screens/forgot_password_screen.dart';
 import 'package:btih_andriod_app/screens/sign_up_screen.dart';
 import '../theme/app_colors.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
-import 'package:btih_andriod_app/widgets/login_outlined_button.dart';
 import 'package:btih_andriod_app/widgets/login_wave_header.dart';
 
 /// =====================
@@ -27,7 +27,6 @@ class LoginScreen extends StatefulWidget {
   final String returnScreen;
   final String? patientMrNo;
   final String? patientName;
-  final bool isStaffLogin;
 
   const LoginScreen({
     super.key,
@@ -35,67 +34,154 @@ class LoginScreen extends StatefulWidget {
     this.returnScreen = '',
     this.patientMrNo,
     this.patientName,
-    this.isStaffLogin = false,
   });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
+class _LoginScreenState extends State<LoginScreen>
+    with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _contactController = TextEditingController();
   final _passwordController = TextEditingController();
   final _authService = AuthService();
   final _otpController = TextEditingController();
+  final _otpFocusNode = FocusNode();
 
   bool _loading = false;
   bool _loginSucceeded = false;
   bool _obscurePassword = true;
   bool _awaitingOtp = false;
   bool _trustThisDevice = true;
+  bool _restoringDraft = true;
   String? _loginChallengeId;
   String? _maskedContactNo;
   String _pendingContactNo = '';
+  String? _smsAppHash;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _clearControllers();
+    _contactController.addListener(_onDraftFieldChanged);
+    _passwordController.addListener(_onDraftFieldChanged);
+    _otpController.addListener(_onDraftFieldChanged);
     ApiConfig.ensureResolved();
+    unawaited(_restoreLoginDraft());
+  }
+
+  Future<void> _restoreLoginDraft() async {
+    final draft = await LoginFlowPersistence.load();
+    if (!mounted) return;
+
+    if (draft == null || !draft.hasMeaningfulData) {
+      setState(() => _restoringDraft = false);
+      return;
+    }
+
+    _contactController.text = draft.identifier;
+    _passwordController.text = draft.password;
+    _otpController.text = draft.otp;
+    setState(() {
+      _awaitingOtp = draft.awaitingOtp &&
+          draft.loginChallengeId != null &&
+          draft.loginChallengeId!.isNotEmpty;
+      _loginChallengeId = draft.loginChallengeId;
+      _maskedContactNo = draft.maskedContactNo;
+      _pendingContactNo = draft.pendingContactNo;
+      _trustThisDevice = draft.trustThisDevice;
+      _restoringDraft = false;
+    });
+
+    if (_awaitingOtp) {
+      await _prepareOtpAutofill();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _otpFocusNode.requestFocus();
+      });
+    }
+  }
+
+  void _onDraftFieldChanged() {
+    if (_restoringDraft || _loginSucceeded) return;
+    unawaited(_persistLoginDraft());
+  }
+
+  LoginFlowDraft _currentDraft() {
+    return LoginFlowDraft(
+      identifier: _contactController.text,
+      password: _passwordController.text,
+      awaitingOtp: _awaitingOtp,
+      loginChallengeId: _loginChallengeId,
+      maskedContactNo: _maskedContactNo,
+      pendingContactNo: _pendingContactNo,
+      trustThisDevice: _trustThisDevice,
+      otp: _otpController.text,
+      savedAt: DateTime.now(),
+    );
+  }
+
+  Future<void> _persistLoginDraft() async {
+    final draft = _currentDraft();
+    if (!draft.hasMeaningfulData) {
+      await LoginFlowPersistence.clear();
+      return;
+    }
+    await LoginFlowPersistence.save(draft);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _clearControllers();
-      ApiConfig.ensureResolved(force: true);
-      AuthSession.ensureValidSession();
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      if (!_loginSucceeded && !_restoringDraft) {
+        unawaited(_persistLoginDraft());
+      }
+      return;
     }
+
+    if (state != AppLifecycleState.resumed) return;
+
+    if (_awaitingOtp) {
+      unawaited(_persistLoginDraft());
+      unawaited(_prepareOtpAutofill());
+      if (_otpFocusNode.canRequestFocus) {
+        _otpFocusNode.requestFocus();
+      }
+      return;
+    }
+
+    ApiConfig.ensureResolved(force: false);
+    unawaited(_persistLoginDraft());
   }
 
-  void _clearControllers() {
-    _contactController.clear();
-    _passwordController.clear();
-    _otpController.clear();
-    setState(() {
-      _loading = false;
-      _obscurePassword = true;
-      _awaitingOtp = false;
-      _loginChallengeId = null;
-      _maskedContactNo = null;
-      _pendingContactNo = '';
-      _trustThisDevice = true;
-    });
+  Future<void> _prepareOtpAutofill() async {
+    await ensureSmsOtpListening();
+    if (kDebugMode) {
+      final hash = await getAndroidSmsAppHash();
+      if (hash != null && mounted) {
+        setState(() => _smsAppHash = hash);
+        // ignore: avoid_print
+        print('[SMS Autofill] Android app hash: $hash');
+      }
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _contactController.removeListener(_onDraftFieldChanged);
+    _passwordController.removeListener(_onDraftFieldChanged);
+    _otpController.removeListener(_onDraftFieldChanged);
+    if (!_loginSucceeded) {
+      unawaited(_persistLoginDraft());
+    }
     _contactController.dispose();
     _passwordController.dispose();
     _otpController.dispose();
+    _otpFocusNode.dispose();
     super.dispose();
   }
 
@@ -110,7 +196,9 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     if (_loading) return;
     if (!_formKey.currentState!.validate()) return;
 
-    final contactNo = _contactController.text.trim();
+    final contactNo = AuthValidation.normalizeLoginIdentifier(
+      _contactController.text.trim(),
+    );
     final password = _passwordController.text;
 
     setState(() => _loading = true);
@@ -119,7 +207,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
       final response = await _authService.login(
         contactNo: contactNo,
         password: password,
-        useTrustedDevice: !widget.isStaffLogin,
+        useTrustedDevice: true,
       );
 
       if (response['requiresOtp'] == true) {
@@ -134,6 +222,15 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
             _otpController.text = debugOtp;
           }
         });
+        await _persistLoginDraft();
+        await _prepareOtpAutofill();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _otpFocusNode.requestFocus();
+        });
+        if (debugOtp != null && debugOtp.length == 6) {
+          // Dev/SMS-fallback path: auto-verify when server returns the code.
+          unawaited(_verifyLoginOtp());
+        }
         return;
       }
 
@@ -177,7 +274,12 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
         context,
         'Login verification expired. Please sign in again.',
       );
-      setState(() => _awaitingOtp = false);
+      setState(() {
+        _awaitingOtp = false;
+        _loginChallengeId = null;
+        _maskedContactNo = null;
+      });
+      unawaited(_persistLoginDraft());
       return;
     }
 
@@ -223,6 +325,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
       _loading = false;
       _loginSucceeded = true;
     });
+    await LoginFlowPersistence.clear();
 
     await Future<void>.delayed(const Duration(milliseconds: 1100));
     if (!mounted) return;
@@ -240,60 +343,22 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   void _backToCredentials() {
+    // Keep MR/phone + password; only leave the OTP step (TC-018).
     setState(() {
       _awaitingOtp = false;
       _loginChallengeId = null;
       _maskedContactNo = null;
       _otpController.clear();
     });
+    unawaited(_persistLoginDraft());
   }
 
   String? _validateContact(String? value) {
-    return widget.isStaffLogin
-        ? AuthValidation.validateStaffIdentifier(value)
-        : AuthValidation.validatePatientContact(value);
+    return AuthValidation.validateLoginIdentifier(value);
   }
 
   String? _validatePassword(String? value) {
-    return AuthValidation.validatePassword(value);
-  }
-
-  Future<void> _loginAsGuest() async {
-    if (_loading) return;
-    await GuestSession.clear();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => const PatientMainShell(
-          patientMrNo: '',
-          patientName: 'Guest',
-          isLoggedIn: false,
-        ),
-      ),
-      (route) => false,
-    );
-  }
-
-  void _showContactAdministrator() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Contact Administrator'),
-        content: const Text(
-          'For doctor or admin account access, please contact the hospital IT department or administration office.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'OK',
-              style: TextStyle(color: AppColors.primaryRed),
-            ),
-          ),
-        ],
-      ),
-    );
+    return AuthValidation.validateLoginPassword(value);
   }
 
   InputDecoration _authFieldDecoration({
@@ -329,30 +394,20 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildOrDivider() {
-    return Row(
-      children: [
-        const Expanded(child: Divider(color: AppColors.fieldBorder)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Text(
-            'or',
-            style: AppTypography.roboto(
-              fontSize: 13,
-              color: AppColors.greyText,
-            ),
-          ),
-        ),
-        const Expanded(child: Divider(color: AppColors.fieldBorder)),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final isStaff = widget.isStaffLogin;
-
-    return Scaffold(
+    return PopScope(
+      canPop: !_awaitingOtp && !widget.redirectAfterLogin,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          unawaited(_persistLoginDraft());
+          return;
+        }
+        if (_awaitingOtp) {
+          _backToCredentials();
+        }
+      },
+      child: Scaffold(
       backgroundColor: AppColors.blush,
       body: Stack(
         children: [
@@ -360,19 +415,30 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               LoginWaveHeader(
-                title: isStaff
-                    ? 'Hospital Staff Login'
-                    : (_awaitingOtp ? 'Verify Device' : 'Sign In'),
-                subtitle: isStaff
-                    ? 'Secure access for authorized hospital staff.'
-                    : _awaitingOtp
-                        ? 'We sent a verification code to ${_maskedContactNo ?? 'your registered mobile number'}.'
-                        : 'Welcome back — Sign in to manage your healthcare with ease.',
-                showBackButton: !widget.redirectAfterLogin,
-                onBack: _awaitingOtp ? _backToCredentials : null,
+                title: _awaitingOtp ? 'Verify Device' : 'Sign In',
+                subtitle: _awaitingOtp
+                    ? 'We sent a verification code to ${_maskedContactNo ?? 'your registered mobile number'}.'
+                    : 'Welcome back — Sign in to manage your healthcare with ease.',
+                showBackButton: !widget.redirectAfterLogin || _awaitingOtp,
+                onBack: _awaitingOtp
+                    ? _backToCredentials
+                    : (widget.redirectAfterLogin
+                        ? null
+                        : () {
+                            unawaited(_persistLoginDraft());
+                            Navigator.of(context).maybePop();
+                          }),
               ),
               Expanded(
-                child: SingleChildScrollView(
+                child: _restoringDraft
+                    ? const Center(
+                        child: SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        ),
+                      )
+                    : SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(28, 25, 28, 28),
                   child: Form(
                     key: _formKey,
@@ -383,8 +449,9 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                         if (!_awaitingOtp) ...[
                           TextFormField(
                             controller: _contactController,
-                            keyboardType:
-                                isStaff ? TextInputType.text : TextInputType.phone,
+                            keyboardType: TextInputType.text,
+                            textInputAction: TextInputAction.next,
+                            autocorrect: false,
                             enabled: !_loading && !_loginSucceeded,
                             validator: _validateContact,
                             style: AppTypography.roboto(
@@ -392,10 +459,19 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                               color: AppColors.darkText,
                             ),
                             decoration: _authFieldDecoration(
-                              hint: isStaff ? 'Staff ID / Email' : 'Contact Number',
+                              hint: 'MR or Mobile Number',
                             ),
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 6),
+                          Text(
+                            '',
+                            style: AppTypography.roboto(
+                              fontSize: 11,
+                              color: AppColors.greyText,
+                              height: 1.35,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
                           TextFormField(
                             controller: _passwordController,
                             obscureText: _obscurePassword,
@@ -446,32 +522,65 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                         onPressed: _login,
                       ),
                     ] else ...[
-                      TextField(
-                        controller: _otpController,
-                        keyboardType: TextInputType.number,
-                        maxLength: 6,
-                        enabled: !_loading,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      Text(
+                        'When the SMS arrives, tap the code above your keyboard '
+                        'to autofill — or type it manually.',
                         textAlign: TextAlign.center,
                         style: AppTypography.roboto(
-                          fontSize: 22,
-                          letterSpacing: 8,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.darkText,
+                          fontSize: 12,
+                          color: AppColors.greyText,
+                          height: 1.35,
                         ),
-                        decoration: authUnderlineFieldDecoration(
-                          hint: '000000',
-                          counterText: '',
+                      ),
+                      if (kDebugMode &&
+                          _smsAppHash != null &&
+                          _smsAppHash!.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        GestureDetector(
+                          onTap: () async {
+                            await Clipboard.setData(
+                              ClipboardData(text: _smsAppHash!),
+                            );
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('App hash copied'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          child: Text(
+                            'SMS app hash: $_smsAppHash\n'
+                            '(tap to copy → Sms:AndroidAppHash)',
+                            textAlign: TextAlign.center,
+                            style: AppTypography.roboto(
+                              fontSize: 11,
+                              color: AppColors.primaryRed,
+                              height: 1.35,
+                            ),
+                          ),
                         ),
+                      ],
+                      const SizedBox(height: 16),
+                      OtpAutofillField(
+                        controller: _otpController,
+                        focusNode: _otpFocusNode,
+                        enabled: !_loading,
+                        onCompleted: (_) {
+                          if (!_loading) unawaited(_verifyLoginOtp());
+                        },
                       ),
                       const SizedBox(height: 8),
                       CheckboxListTile(
                         value: _trustThisDevice,
                         onChanged: _loading
                             ? null
-                            : (value) => setState(
+                            : (value) {
+                                setState(
                                   () => _trustThisDevice = value ?? true,
-                                ),
+                                );
+                                unawaited(_persistLoginDraft());
+                              },
                         activeColor: AppColors.primaryRed,
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
@@ -507,16 +616,6 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ],
-                    if (!isStaff && !_awaitingOtp) ...[
-                      const SizedBox(height: 24),
-                      _buildOrDivider(),
-                      const SizedBox(height: 24),
-                      LoginOutlinedButton(
-                        label: 'Login as a Guest',
-                        onPressed:
-                            (_loading || _loginSucceeded) ? null : _loginAsGuest,
-                      ),
-                    ],
                     const SizedBox(height: 28),
                     Center(
                       child: widget.redirectAfterLogin
@@ -549,31 +648,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                             )
-                          : isStaff
-                              ? RichText(
-                                  textAlign: TextAlign.center,
-                                  text: TextSpan(
-                                    style: AppTypography.roboto(
-                                      fontSize: 14,
-                                      color: AppColors.greyText,
-                                    ),
-                                    children: [
-                                      const TextSpan(
-                                        text: "Don't have an account? ",
-                                      ),
-                                      TextSpan(
-                                        text: 'Contact Administrator',
-                                        style: AppTypography.raleway(
-                                          color: AppColors.primaryRed,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                        recognizer: TapGestureRecognizer()
-                                          ..onTap = _showContactAdministrator,
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              : RichText(
+                          : RichText(
                                   textAlign: TextAlign.center,
                                   text: TextSpan(
                                     style: AppTypography.roboto(
@@ -639,6 +714,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
               ),
             ),
         ],
+      ),
       ),
     );
   }

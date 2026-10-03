@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:btih_andriod_app/services/report_pdf_cache_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/download_location_helper.dart';
@@ -73,9 +74,18 @@ class BillingPdfService {
       throw Exception('Bill ID is missing for this record.');
     }
 
+    final cacheKey = ReportPdfCacheService.buildKey(
+      rptId: rptId.toString(),
+      reportName: _billReportName,
+      parameters: billId.trim(),
+    );
+    final cached = await ReportPdfCacheService.getCachedBytes(cacheKey);
+    if (cached != null) return cached;
+
     final dio = ApiConfig.createDio();
-    dio.options.connectTimeout = const Duration(seconds: 8);
+    dio.options.connectTimeout = const Duration(seconds: 5);
     dio.options.receiveTimeout = const Duration(seconds: 12);
+    dio.options.sendTimeout = const Duration(seconds: 5);
 
     final urls = <String>[
       _generateReportsUrl(rptId: rptId, billId: billId),
@@ -114,16 +124,30 @@ class BillingPdfService {
         }
 
         final contentType = response.headers.value('content-type');
-        if (contentType == null || !contentType.contains('application/pdf')) {
+        final bytes = response.data ?? const <int>[];
+        if (!ReportPdfCacheService.looksLikePdf(bytes) &&
+            (contentType == null || !contentType.contains('application/pdf'))) {
           throw Exception('Server did not return a valid PDF');
         }
 
-        return response.data ?? const <int>[];
-      } catch (e) {
+        await ReportPdfCacheService.putBytes(cacheKey: cacheKey, bytes: bytes);
+        return bytes;
+      } on DioException catch (e) {
         lastError = e;
-        if (e is DioException && e.response?.statusCode == 404) {
+        if (e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.sendTimeout) {
+          throw Exception(
+            'Bill PDF is taking too long on the hospital network. '
+            'Please try again in a moment.',
+          );
+        }
+        if (e.response?.statusCode == 404) {
           continue;
         }
+        rethrow;
+      } catch (e) {
+        lastError = e;
         rethrow;
       }
     }

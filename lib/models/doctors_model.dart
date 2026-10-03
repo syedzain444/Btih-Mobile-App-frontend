@@ -94,12 +94,20 @@ class DoctorResponse {
     final rawData = json['data'] ?? json['Data'];
     final rawPagination = json['pagination'] ?? json['Pagination'];
 
-    final data = rawData is List
-        ? rawData.map((e) => Doctor.fromJson(e as Map<String, dynamic>)).toList()
-        : <Doctor>[];
+    final data = <Doctor>[];
+    if (rawData is List) {
+      for (final entry in rawData) {
+        if (entry is! Map) continue;
+        try {
+          data.add(Doctor.fromJson(Map<String, dynamic>.from(entry)));
+        } catch (_) {
+          // Skip malformed doctor rows instead of crashing the list.
+        }
+      }
+    }
 
-    final pagination = rawPagination is Map<String, dynamic>
-        ? Pagination.fromJson(rawPagination)
+    final pagination = rawPagination is Map
+        ? Pagination.fromJson(Map<String, dynamic>.from(rawPagination))
         : Pagination.empty();
 
     return DoctorResponse(data: data, pagination: pagination);
@@ -133,13 +141,18 @@ class Pagination {
 
   factory Pagination.fromJson(Map<String, dynamic> json) {
     return Pagination(
-      pageNumber:
-          json['pageNumber'] ?? json['PageNumber'] ?? 1,
-      pageSize: json['pageSize'] ?? json['PageSize'] ?? 10,
-      totalRecords:
-          json['totalRecords'] ?? json['TotalRecords'] ?? 0,
-      totalPages: json['totalPages'] ?? json['TotalPages'] ?? 0,
+      pageNumber: _asInt(json['pageNumber'] ?? json['PageNumber']) ?? 1,
+      pageSize: _asInt(json['pageSize'] ?? json['PageSize']) ?? 10,
+      totalRecords: _asInt(json['totalRecords'] ?? json['TotalRecords']) ?? 0,
+      totalPages: _asInt(json['totalPages'] ?? json['TotalPages']) ?? 0,
     );
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString().trim());
   }
 
   factory Pagination.empty() {

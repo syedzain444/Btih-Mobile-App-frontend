@@ -1,4 +1,6 @@
 import 'package:btih_andriod_app/models/patient_report_model.dart';
+import 'package:btih_andriod_app/screens/billing/payment_qr_scan_screen.dart';
+import 'package:btih_andriod_app/screens/billing/payment_qr_screen.dart';
 import 'package:btih_andriod_app/services/billing_service.dart';
 import 'package:btih_andriod_app/services/notification_service.dart';
 import 'package:btih_andriod_app/services/payment_service.dart';
@@ -96,6 +98,34 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
       if (!mounted) return;
 
+      // Show payment QR (scan returns appointment details) before/alongside checkout.
+      if (intent.hasQr) {
+        final confirmedFromQr = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PaymentQrScreen(
+              intent: intent,
+              onConfirmPaid: () async {
+                final confirmed = await _paymentService.confirm(
+                  paymentId: intent.paymentId,
+                  gatewayRef: intent.gatewayRef,
+                );
+                await NotificationService.instance.notifyPaymentConfirmed(
+                  mrNo: widget.patientMrNo,
+                  amount: formatBillingCurrency(confirmed.amount),
+                  reference: confirmed.invoiceNo ?? bill.invoiceNo,
+                );
+              },
+            ),
+          ),
+        );
+        if (confirmedFromQr == true) {
+          _toast('Payment confirmed successfully.');
+          await _load();
+          return;
+        }
+      }
+
       final checkout = intent.checkoutUrl;
       if (checkout != null && checkout.isNotEmpty) {
         final uri = Uri.tryParse(checkout);
@@ -119,7 +149,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
           content: Text(
             'Complete payment in the browser, then tap Confirm.\n\n'
             'Amount: ${formatBillingCurrency(amount)}\n'
-            'Ref: ${intent.gatewayRef ?? intent.paymentId}',
+            'Ref: ${intent.gatewayRef ?? intent.paymentId}'
+            '${intent.appointment?.doctorName != null ? '\nDoctor: ${intent.appointment!.doctorName}' : ''}'
+            '${intent.appointment?.appointmentTime != null ? '\nSlot: ${intent.appointment!.appointmentTime}' : ''}',
             style: AppTypography.roboto(
               fontSize: 14,
               color: AppColors.greyText,
@@ -202,8 +234,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
           ),
         ),
         centerTitle: true,
-        actions: const [
-          AppBarIconBadge(icon: Icons.payments_outlined),
+        actions: [
+          IconButton(
+            tooltip: 'Scan payment QR',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const PaymentQrScanScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.qr_code_scanner_rounded, color: AppColors.white),
+          ),
+          const AppBarIconBadge(icon: Icons.payments_outlined),
         ],
       ),
       body: _isLoading
@@ -264,7 +308,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         Text(
           pending.isEmpty
               ? 'No outstanding balance right now.'
-              : 'Select a bill to open checkout and confirm payment.',
+              : 'Select a bill to open payment QR (scan returns appointment details) and checkout.',
           style: AppTypography.roboto(
             fontSize: 12,
             color: AppColors.greyText,
@@ -314,7 +358,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
           ..._onlineHistory.map(
             (intent) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: _OnlinePaymentTile(intent: intent, paidGreen: _paidGreen),
+              child: _OnlinePaymentTile(
+                intent: intent,
+                paidGreen: _paidGreen,
+                onShowQr: intent.hasQr
+                    ? () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PaymentQrScreen(intent: intent),
+                          ),
+                        );
+                      }
+                    : null,
+              ),
             ),
           ),
       ],
@@ -495,10 +552,12 @@ class _PendingBillTile extends StatelessWidget {
 class _OnlinePaymentTile extends StatelessWidget {
   final PaymentIntent intent;
   final Color paidGreen;
+  final VoidCallback? onShowQr;
 
   const _OnlinePaymentTile({
     required this.intent,
     required this.paidGreen,
+    this.onShowQr,
   });
 
   @override
@@ -506,63 +565,73 @@ class _OnlinePaymentTile extends StatelessWidget {
     final isPaid = intent.isPaid;
     final statusColor = isPaid ? paidGreen : AppColors.primaryRed;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.fieldBorder),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return TapFeedback(
+      onTap: onShowQr,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.fieldBorder),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    intent.invoiceNo?.isNotEmpty == true
+                        ? 'Invoice ${intent.invoiceNo}'
+                        : 'Payment #${intent.paymentId}',
+                    style: AppTypography.raleway(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.darkText,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    intent.appointment?.doctorName?.isNotEmpty == true
+                        ? '${intent.appointment!.doctorName} · ${intent.status}'
+                        : (intent.gatewayRef ?? intent.status),
+                    style: AppTypography.roboto(
+                      fontSize: 12,
+                      color: AppColors.greyText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (onShowQr != null) ...[
+              const Icon(Icons.qr_code_2_rounded, color: AppColors.primaryRed, size: 20),
+              const SizedBox(width: 8),
+            ],
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  intent.invoiceNo?.isNotEmpty == true
-                      ? 'Invoice ${intent.invoiceNo}'
-                      : 'Payment #${intent.paymentId}',
-                  style: AppTypography.raleway(
+                  formatBillingCurrency(intent.amount),
+                  style: AppTypography.montserrat(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.darkText,
+                    color: statusColor,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  intent.gatewayRef ?? intent.status,
+                  intent.status,
                   style: AppTypography.roboto(
-                    fontSize: 12,
-                    color: AppColors.greyText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: statusColor,
                   ),
                 ),
               ],
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                formatBillingCurrency(intent.amount),
-                style: AppTypography.montserrat(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: statusColor,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                intent.status,
-                style: AppTypography.roboto(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: statusColor,
-                ),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

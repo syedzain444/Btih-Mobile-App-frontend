@@ -63,31 +63,6 @@ class TrustedDeviceService {
   static const _tokenPrefixMr = 'device_trust_token_mr_v2_';
   static const _tokenPrefixContact = 'device_trust_token_contact_v2_';
 
-  /// Temporary SMS-outage bypass — login without OTP for this number only.
-  static const temporarySmsBypassContacts = <String>{
-    '03339993577',
-    '3339993577',
-    '923339993577',
-  };
-
-  static bool isTemporarySmsBypassContact(String contactNo) {
-    final normalized = _normalizeContact(contactNo);
-    return temporarySmsBypassContacts.any(
-      (entry) => _normalizeContact(entry) == normalized,
-    );
-  }
-
-  static String _normalizeContact(String contactNo) {
-    var digits = contactNo.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('92') && digits.length >= 12) {
-      digits = digits.substring(2);
-    }
-    if (digits.startsWith('0') && digits.length > 1) {
-      digits = digits.substring(1);
-    }
-    return digits;
-  }
-
   static String _trustTokenKeyForMrNo(String mrNo) =>
       '$_tokenPrefixMr${mrNo.trim()}';
 
@@ -195,9 +170,22 @@ class TrustedDeviceService {
     return 'This device';
   }
 
+  static Future<String?> getTrustTokenForMrNo(String mrNo) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString(_trustTokenKeyForMrNo(mrNo));
+      if (token == null || token.trim().isEmpty) return null;
+      return token.trim();
+    } catch (e, st) {
+      debugPrint('TrustedDeviceService.getTrustTokenForMrNo failed: $e\n$st');
+      return null;
+    }
+  }
+
   /// Never throws — login must proceed even if storage fails.
   static Future<Map<String, String>> buildLoginDevicePayload({
     required String contactNo,
+    String? mrNo,
   }) async {
     try {
       final installId = await getDeviceInstallId();
@@ -207,7 +195,11 @@ class TrustedDeviceService {
         'platform': await currentPlatform(),
       };
 
-      final trustToken = await getTrustTokenForContact(contactNo);
+      String? trustToken;
+      if (mrNo != null && mrNo.trim().isNotEmpty) {
+        trustToken = await getTrustTokenForMrNo(mrNo.trim());
+      }
+      trustToken ??= await getTrustTokenForContact(contactNo);
       if (trustToken != null) {
         payload['deviceTrustToken'] = trustToken;
       }

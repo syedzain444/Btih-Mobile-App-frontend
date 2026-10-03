@@ -10,11 +10,16 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Resolves the HMIS API base URL automatically and remembers what worked.
+/// Resolves the HMIS API base URL.
 ///
-/// Default target is the hospital production API on `.93:7078`.
-/// Use `--dart-define=API_MODE=local` (and optional `API_HOST`) only when you
-/// intentionally want the local `dotnet run` backend.
+/// Hospital servers:
+///   .36 → http://172.20.8.36           (IIS, no port)
+///   .24 → http://172.16.40.24          (IIS, no port)
+///   .93 → http://10.101.1.93:7078
+///
+/// Override at build/run time:
+///   --dart-define=API_HOST=http://172.20.8.36
+///   --dart-define=API_MODE=production
 class ApiConfig {
   ApiConfig._();
 
@@ -23,20 +28,32 @@ class ApiConfig {
   static const String localDevSwaggerUrl =
       '$localDevBaseUrl/swagger/index.html';
 
-  /// Deployed HMIS API — hospital LAN.
-  static const String productionApiHost = '10.101.1.93';
-  static const String productionBaseUrl = 'http://$productionApiHost:7078';
+  /// Hospital API (.36 on port 80).
+  static const String apiHost36 = '172.20.8.36';
+  static const String apiBase36 = 'http://$apiHost36';
+
+  /// Hospital API (.24 on port 80).
+  static const String apiHost24 = '172.16.40.24';
+  static const String apiBase24 = 'http://$apiHost24';
+
+  /// Alternate hospital API (.93 on port 7078).
+  static const String apiHost93 = '10.101.1.93';
+  static const String apiBase93 = 'http://$apiHost93:7078';
+
+  /// Default packaged target — .36.
+  static const String productionApiHost = apiHost36;
+  static const String productionBaseUrl = apiBase36;
   static const String productionSwaggerUrl =
       '$productionBaseUrl/Swagger/index.html';
 
-  /// Default API target (production on .93).
+  /// Default API target.
   static const String defaultBaseUrl = productionBaseUrl;
   static const String swaggerUrl = productionSwaggerUrl;
 
   /// USB tunnel via adb reverse for the **local** API (port 8080).
   static const String usbTunnelBaseUrl = 'http://127.0.0.1:8080';
 
-  /// USB tunnel via adb reverse for the **hospital** API (port 7078).
+  /// USB tunnel via adb reverse for the **.93** API (port 7078).
   static const String productionUsbTunnelBaseUrl = 'http://127.0.0.1:7078';
 
   static const int localDevPort = 8080;
@@ -186,6 +203,9 @@ class ApiConfig {
     if (!force && _resolvedBaseUrl != null) {
       if (apiMode == 'production' &&
           (_resolvedBaseUrl == productionBaseUrl ||
+              _resolvedBaseUrl == apiBase36 ||
+              _resolvedBaseUrl == apiBase24 ||
+              _resolvedBaseUrl == apiBase93 ||
               _resolvedBaseUrl == productionUsbTunnelBaseUrl)) {
         return true;
       }
@@ -358,28 +378,14 @@ class ApiConfig {
     return _saveResolved(target, 'production', prefs);
   }
 
-  /// Physical Android: use USB tunnel only when it responds; otherwise .93.
-  /// Emulator / desktop: prefer direct hospital LAN URL.
+  /// Physical Android on Wi‑Fi: use the hospital URL directly.
+  /// USB tunnel is only for intentional adb reverse debug sessions.
   static Future<String> _pickProductionBaseUrl() async {
-    final physicalAndroid = await _isPhysicalAndroidDevice();
-
-    if (physicalAndroid) {
-      if (await _probeFast(productionUsbTunnelBaseUrl)) {
-        return productionUsbTunnelBaseUrl;
-      }
-      if (await _probeFast(productionBaseUrl)) {
-        return productionBaseUrl;
-      }
-      // Never default to a dead tunnel — .93 is the real production host.
-      return productionBaseUrl;
-    }
-
     if (await _probeFast(productionBaseUrl)) {
       return productionBaseUrl;
     }
-    if (await _probeFast(productionUsbTunnelBaseUrl)) {
-      return productionUsbTunnelBaseUrl;
-    }
+    // Keep pinning the hospital host even if probe is slow — do not
+    // silently switch a release APK onto 127.0.0.1.
     return productionBaseUrl;
   }
 
@@ -457,23 +463,18 @@ class ApiConfig {
 
   static String _buildConnectionError(int triedCount) {
     return 'Cannot reach the HMIS API.\n\n'
-        'Tried: $productionBaseUrl\n'
-        'USB tunnel: $productionUsbTunnelBaseUrl\n\n'
-        'For phone over USB (run-dev.bat option 3):\n'
-        '1. Keep USB connected with debugging on\n'
-        '2. Confirm: adb reverse --list shows tcp:7078\n'
-        '3. Fully restart Flutter (not hot reload)\n\n'
-        'Or join hospital Wi‑Fi and open:\n'
-        '$productionSwaggerUrl';
+        'Tried: $productionBaseUrl\n\n'
+        '1. Join hospital Wi‑Fi (same network as .24 / .93)\n'
+        '2. Open $productionSwaggerUrl in a browser\n'
+        '3. Run RUN.bat → option 1 (.24) or 2 (.93)';
   }
 
   static String _buildLocalConnectionError(String attemptedUrl) {
     return 'Cannot reach the local HMIS API at:\n'
         '$attemptedUrl\n\n'
-        '1. Run option 1 or 2 from run-dev.bat so the local API starts\n'
+        '1. Start the API in Visual Studio (profile "http", port 8080)\n'
         '2. Open $attemptedUrl/swagger/index.html\n'
-        '3. For Android USB: keep the phone connected (adb reverse)\n'
-        '4. Hot-restart the Flutter app after the API is up';
+        '3. Use RUN.bat → option 5 (Chrome)';
   }
 
   static Future<void> _migrateLegacyKeys(SharedPreferences prefs) async {
@@ -526,7 +527,9 @@ class ApiConfig {
 
   static String _environmentForUrl(String url) {
     final normalized = _normalize(url);
-    if (normalized.contains(productionApiHost) ||
+    if (normalized.contains(apiHost36) ||
+        normalized.contains(apiHost24) ||
+        normalized.contains(apiHost93) ||
         normalized == productionUsbTunnelBaseUrl ||
         normalized.endsWith(':$productionPort')) {
       return 'production';
@@ -651,18 +654,27 @@ class ApiConfig {
     String? savedUrl,
     String? customUrl,
   ) async {
-    if (savedUrl != null && _isLegacyApiUrl(savedUrl)) {
+    if (savedUrl != null &&
+        (_isLegacyApiUrl(savedUrl) || _looksLikeSwaggerPage(savedUrl))) {
       await prefs.remove(_savedUrlKey);
     }
-    if (customUrl != null && _isLegacyApiUrl(customUrl)) {
+    if (customUrl != null &&
+        (_isLegacyApiUrl(customUrl) || _looksLikeSwaggerPage(customUrl))) {
       await prefs.remove(_customUrlKey);
     }
+  }
+
+  static bool _looksLikeSwaggerPage(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('/swagger');
   }
 
   static bool _isLegacyApiUrl(String url) {
     if (url.contains('127.0.0.1') ||
         url.contains('localhost') ||
-        url.contains(productionApiHost)) {
+        url.contains(apiHost36) ||
+        url.contains(apiHost24) ||
+        url.contains(apiHost93)) {
       return false;
     }
     const lanHost = String.fromEnvironment('API_LAN_HOST');
@@ -688,10 +700,10 @@ class ApiConfig {
         final response =
             await _probeClient.get(uri).timeout(fastProbeTimeout);
         if (response.statusCode == 200) return true;
-        // Health may return 503 when degraded but API host is reachable.
+        // Health 503 = API reachable but DB/schema degraded — still online.
         if (path == '/api/Health' &&
-            (response.statusCode == 503 || response.statusCode == 200)) {
-          return response.statusCode == 200;
+            (response.statusCode == 503 || response.statusCode == 502)) {
+          return true;
         }
       } catch (_) {}
     }
@@ -703,8 +715,24 @@ class ApiConfig {
     if (value.endsWith('/')) {
       value = value.substring(0, value.length - 1);
     }
+    // Never treat a Swagger HTML page as the API root.
+    final lower = value.toLowerCase();
+    for (final junk in [
+      '/swagger/index.html',
+      '/swagger/v1/swagger.json',
+      '/swagger',
+    ]) {
+      final idx = lower.indexOf(junk);
+      if (idx > 0) {
+        value = value.substring(0, idx);
+        break;
+      }
+    }
+    if (value.endsWith('/')) {
+      value = value.substring(0, value.length - 1);
+    }
     if (!value.startsWith('http://') && !value.startsWith('https://')) {
-      value = 'https://$value';
+      value = 'http://$value';
     }
     final uri = Uri.tryParse(value);
     if (uri != null && uri.host.isNotEmpty) {

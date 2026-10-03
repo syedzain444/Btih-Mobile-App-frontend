@@ -1,3 +1,3 @@
 @echo off
-REM Shortcut — opens the repo launcher (Chrome + local API).
-call "%~dp0..\run-dev.bat" chrome
+REM Deprecated — use RUN.bat option 5.
+call "%~dp0..\RUN.bat"

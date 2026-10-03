@@ -20,6 +20,34 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Last-resort UI safety: never show the red crash screen to patients.
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: Colors.white,
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              'Something went wrong on this screen.\nPlease go back and try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xFF4A4A4A),
+                fontSize: 15,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+
   AuthSession.navigatorKey = appNavigatorKey;
   await ApiConfig.init();
   await AuthSession.init();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:btih_andriod_app/models/doctors_model.dart';
 import 'package:btih_andriod_app/models/specialization_model.dart';
 import 'package:btih_andriod_app/services/doctors_service.dart';
@@ -48,6 +50,8 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
   int currentPage = 1;
   int totalRecords = 0;
   int totalPages = 1;
+  int _filterGeneration = 0;
+  Timer? _searchDebounce;
 
   static const int _pageSize = 10;
   bool get _hasActiveFilter =>
@@ -61,6 +65,7 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -127,7 +132,9 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
         isLoading = false;
       });
       _precacheDoctorImages(doctorResponse.data);
-      _scrollController.jumpTo(0);
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -144,59 +151,100 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
   }
 
   Future<void> refreshDoctors() async {
+    try {
+      final loaded = await _specializationService.getSpecializations();
+      if (mounted) {
+        setState(() => specializations = loaded);
+      }
+    } catch (_) {}
     await _fetchPage(1, showFullLoader: true);
   }
 
   void _precacheDoctorImages(Iterable<Doctor> doctors) {
-    DoctorImageHelper.precacheAvatars(
-      context,
-      doctors.map((doctor) => doctor.doctorImagePath),
-      maxUrls: _pageSize,
-    );
+    if (!mounted) return;
+    try {
+      DoctorImageHelper.precacheAvatars(
+        context,
+        doctors.map((doctor) => doctor.doctorImagePath),
+        maxUrls: _pageSize,
+      );
+    } catch (_) {
+      // Image precache must never crash the doctors list.
+    }
   }
 
   void _applyDoctorResponse(DoctorResponse response, {required bool reset}) {
     if (reset) {
-      allDoctors = response.data;
+      allDoctors = List<Doctor>.from(response.data);
     } else {
-      allDoctors.addAll(response.data);
+      allDoctors = [...allDoctors, ...response.data];
     }
     currentPage = response.pagination.pageNumber;
-    totalPages = response.pagination.totalPages;
+    totalPages = response.pagination.totalPages <= 0
+        ? 1
+        : response.pagination.totalPages;
     totalRecords = response.pagination.totalRecords;
     _applySearchFilter();
   }
 
-  void _applySearchFilter() {
-    var results = List<Doctor>.from(allDoctors);
-
-    if (selectedSpecialization != null && selectedSpecialization!.isNotEmpty) {
-      results = results
-          .where((doctor) => doctor.specializationName == selectedSpecialization)
-          .toList();
+  static String _safeLower(String? value) {
+    try {
+      return (value ?? '').trim().toLowerCase();
+    } catch (_) {
+      return '';
     }
-
-    if (searchQuery.isNotEmpty) {
-      final query = searchQuery.toLowerCase();
-      results = results.where((doctor) {
-        return doctor.doctorName.toLowerCase().contains(query) ||
-            doctor.specializationName.toLowerCase().contains(query) ||
-            doctor.doctorDescription.toLowerCase().contains(query);
-      }).toList();
-    }
-
-    final hasActiveFilter =
-        searchQuery.isNotEmpty || selectedSpecialization != null;
-    if (hasActiveFilter) {
-      results.sort((a, b) => a.doctorName.compareTo(b.doctorName));
-    } else {
-      results.sort((a, b) => a.serialNumber.compareTo(b.serialNumber));
-    }
-
-    filteredDoctors = results;
   }
 
-  Future<void> _maybeLoadMoreForFilter() async {
+  bool _doctorMatchesQuery(Doctor doctor, String query) {
+    if (query.isEmpty) return true;
+    try {
+      return _safeLower(doctor.doctorName).contains(query) ||
+          _safeLower(doctor.specializationName).contains(query) ||
+          _safeLower(doctor.doctorDescription).contains(query);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _applySearchFilter() {
+    try {
+      var results = List<Doctor>.from(allDoctors);
+
+      final selected = selectedSpecialization?.trim();
+      if (selected != null && selected.isNotEmpty) {
+        final selectedLower = _safeLower(selected);
+        results = results
+            .where(
+              (doctor) =>
+                  _safeLower(doctor.specializationName) == selectedLower,
+            )
+            .toList();
+      }
+
+      if (searchQuery.isNotEmpty) {
+        final query = _safeLower(searchQuery);
+        results =
+            results.where((doctor) => _doctorMatchesQuery(doctor, query)).toList();
+      }
+
+      final hasActiveFilter =
+          searchQuery.isNotEmpty || selectedSpecialization != null;
+      if (hasActiveFilter) {
+        results.sort(
+          (a, b) => _safeLower(a.doctorName).compareTo(_safeLower(b.doctorName)),
+        );
+      } else {
+        results.sort((a, b) => a.serialNumber.compareTo(b.serialNumber));
+      }
+
+      filteredDoctors = results;
+    } catch (_) {
+      filteredDoctors = List<Doctor>.from(allDoctors);
+    }
+  }
+
+  Future<void> _maybeLoadMoreForFilter(int generation) async {
+    if (!mounted || generation != _filterGeneration) return;
     if (!_hasActiveFilter || isPageLoading) return;
     if (currentPage >= totalPages) return;
     if (filteredDoctors.length >= 8) return;
@@ -209,24 +257,37 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
         pageSize: _pageSize,
       );
 
-      if (!mounted) return;
+      if (!mounted || generation != _filterGeneration) return;
 
       setState(() {
         _applyDoctorResponse(doctorResponse, reset: false);
         isPageLoading = false;
       });
       _precacheDoctorImages(doctorResponse.data);
-      _maybeLoadMoreForFilter();
+      await _maybeLoadMoreForFilter(generation);
     } catch (_) {
       if (!mounted) return;
-      setState(() => isPageLoading = false);
+      if (generation == _filterGeneration) {
+        setState(() => isPageLoading = false);
+      }
     }
   }
 
   void _onSearchChanged(String query) {
-    final trimmed = query.trim();
-    final wasFiltering = _hasActiveFilter;
+    _searchDebounce?.cancel();
+    // Keep the field responsive; apply filter after a short pause so rapid
+    // typing (TC-026) does not stack page loads / setStates.
+    _searchDebounce = Timer(const Duration(milliseconds: 220), () {
+      if (!mounted) return;
+      _applyFilterChange(query.trim());
+    });
+  }
 
+  void _applyFilterChange(String trimmed) {
+    final wasFiltering = _hasActiveFilter;
+    final generation = ++_filterGeneration;
+
+    if (!mounted) return;
     setState(() {
       searchQuery = trimmed;
       _applySearchFilter();
@@ -235,15 +296,17 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
     if (wasFiltering && !_hasActiveFilter) {
       _fetchPage(1);
     } else if (!wasFiltering && _hasActiveFilter) {
-      _loadAllForFilter();
-    } else {
-      _maybeLoadMoreForFilter();
+      unawaited(_loadAllForFilter(generation));
+    } else if (_hasActiveFilter) {
+      unawaited(_maybeLoadMoreForFilter(generation));
     }
   }
 
   void _selectSpecialization(String? specialization) {
     final wasFiltering = _hasActiveFilter;
+    final generation = ++_filterGeneration;
 
+    if (!mounted) return;
     setState(() {
       selectedSpecialization = specialization;
       _applySearchFilter();
@@ -252,28 +315,37 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
     if (wasFiltering && !_hasActiveFilter) {
       _fetchPage(1);
     } else if (!wasFiltering && _hasActiveFilter) {
-      _loadAllForFilter();
-    } else {
-      _maybeLoadMoreForFilter();
+      unawaited(_loadAllForFilter(generation));
+    } else if (_hasActiveFilter) {
+      unawaited(_maybeLoadMoreForFilter(generation));
     }
   }
 
-  Future<void> _loadAllForFilter() async {
-    while (mounted && _hasActiveFilter && currentPage < totalPages) {
+  Future<void> _loadAllForFilter(int generation) async {
+    while (mounted &&
+        generation == _filterGeneration &&
+        _hasActiveFilter &&
+        currentPage < totalPages) {
       if (isPageLoading) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
         continue;
       }
-      await _maybeLoadMoreForFilter();
+      await _maybeLoadMoreForFilter(generation);
+      if (generation != _filterGeneration) return;
     }
   }
 
   List<Specialization> get _sortedSpecializations {
-    final items = List<Specialization>.from(specializations)
-      ..sort(
-        (a, b) => a.specializationName.compareTo(b.specializationName),
-      );
-    return items;
+    try {
+      final items = List<Specialization>.from(specializations)
+        ..sort(
+          (a, b) => _safeLower(a.specializationName)
+              .compareTo(_safeLower(b.specializationName)),
+        );
+      return items;
+    } catch (_) {
+      return List<Specialization>.from(specializations);
+    }
   }
 
   Future<void> _openAllSpecialtiesSheet() async {
@@ -303,8 +375,9 @@ class _DoctorsListScreenState extends State<DoctorsListScreen> {
   }
 
   void _clearSearch() {
+    _searchDebounce?.cancel();
     _searchController.clear();
-    _onSearchChanged('');
+    _applyFilterChange('');
   }
 
   void _openDoctorSchedule(Doctor doctor) {
@@ -849,6 +922,9 @@ class _DoctorAvatar extends StatelessWidget {
     final resolvedUrl = DoctorImageHelper.resolve(imageUrl);
     final hasImage = resolvedUrl != null && resolvedUrl.isNotEmpty;
     final iconSize = size * 0.5;
+    final cachePx = (size * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(72, 256);
 
     return Container(
       width: size,
@@ -857,41 +933,46 @@ class _DoctorAvatar extends StatelessWidget {
         color: accent.background,
         shape: BoxShape.circle,
         border: Border.all(
-          color: AppColors.primaryRed.withValues(alpha: 0.18), // fixed theme color, no longer tied to accent
+          color: AppColors.primaryRed.withValues(alpha: 0.18),
           width: 1.2,
         ),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: hasImage
-          ? CachedNetworkImage(
-        imageUrl: resolvedUrl,
-        fit: BoxFit.cover,
-        memCacheWidth: DoctorImageHelper.avatarCachePx,
-        memCacheHeight: DoctorImageHelper.avatarCachePx,
-        maxWidthDiskCache: DoctorImageHelper.avatarCachePx,
-        maxHeightDiskCache: DoctorImageHelper.avatarCachePx,
-        fadeInDuration: const Duration(milliseconds: 150),
-        fadeOutDuration: Duration.zero,
-        placeholder: (_, __) => Center(
-          child: SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: accent.icon,
-            ),
-          ),
-        ),
-        errorWidget: (_, __, ___) => Icon(
-          Icons.person_rounded,
-          size: iconSize,
-          color: accent.icon,
-        ),
-      )
-          : Icon(
-        Icons.person_rounded,
-        size: iconSize,
-        color: accent.icon,
+      child: ClipOval(
+        child: hasImage
+            ? CachedNetworkImage(
+                imageUrl: resolvedUrl,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                alignment: Alignment.topCenter,
+                memCacheWidth: cachePx,
+                memCacheHeight: cachePx,
+                fadeInDuration: const Duration(milliseconds: 120),
+                fadeOutDuration: Duration.zero,
+                placeholder: (_, __) => ColoredBox(
+                  color: accent.background,
+                  child: Center(
+                    child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: accent.icon,
+                      ),
+                    ),
+                  ),
+                ),
+                errorWidget: (_, __, ___) => Icon(
+                  Icons.person_rounded,
+                  size: iconSize,
+                  color: accent.icon,
+                ),
+              )
+            : Icon(
+                Icons.person_rounded,
+                size: iconSize,
+                color: accent.icon,
+              ),
       ),
     );
   }
@@ -913,6 +994,7 @@ class _AllSpecialtiesSheet extends StatefulWidget {
 class _AllSpecialtiesSheetState extends State<_AllSpecialtiesSheet> {
   late final TextEditingController _searchController;
   String _query = '';
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -922,8 +1004,17 @@ class _AllSpecialtiesSheetState extends State<_AllSpecialtiesSheet> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 160), () {
+      if (!mounted) return;
+      setState(() => _query = value);
+    });
   }
 
   Future<void> _closeWithResult(String? value) async {
@@ -934,14 +1025,21 @@ class _AllSpecialtiesSheetState extends State<_AllSpecialtiesSheet> {
     Navigator.pop(context, value);
   }
 
+  List<Specialization> _filteredItems() {
+    try {
+      final query = _query.trim();
+      return widget.specializations
+          .where((item) => item.matchesQuery(query))
+          .toList();
+    } catch (_) {
+      return List<Specialization>.from(widget.specializations);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.72;
-    final query = _query.trim().toLowerCase();
-    final items = widget.specializations.where((item) {
-      if (query.isEmpty) return true;
-      return item.specializationName.toLowerCase().contains(query);
-    }).toList();
+    final items = _filteredItems();
 
     return PopScope(
       canPop: false,
@@ -984,7 +1082,8 @@ class _AllSpecialtiesSheetState extends State<_AllSpecialtiesSheet> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _searchController,
-                    onChanged: (value) => setState(() => _query = value),
+                    onChanged: _onQueryChanged,
+                    textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
                       hintText: 'Search specialty...',
                       hintStyle: AppTypography.roboto(
@@ -995,6 +1094,20 @@ class _AllSpecialtiesSheetState extends State<_AllSpecialtiesSheet> {
                         Icons.search_rounded,
                         color: AppColors.greyText.withValues(alpha: 0.95),
                       ),
+                      suffixIcon: _query.trim().isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear',
+                              onPressed: () {
+                                _debounce?.cancel();
+                                _searchController.clear();
+                                setState(() => _query = '');
+                              },
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                color: AppColors.greyText,
+                              ),
+                            ),
                       filled: true,
                       fillColor: AppColors.white,
                       border: OutlineInputBorder(
@@ -1045,6 +1158,9 @@ class _AllSpecialtiesSheetState extends State<_AllSpecialtiesSheet> {
                               color: AppColors.hairline,
                             ),
                             itemBuilder: (context, index) {
+                              if (index < 0 || index >= items.length) {
+                                return const SizedBox.shrink();
+                              }
                               final item = items[index];
                               final selected =
                                   widget.selectedSpecialization ==

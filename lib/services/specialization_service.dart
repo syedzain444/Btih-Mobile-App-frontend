@@ -14,7 +14,21 @@ class SpecializationService {
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);
       if (body is! List) return [];
-      return body.map((json) => Specialization.fromJson(json)).toList();
+
+      final result = <Specialization>[];
+      for (final entry in body) {
+        if (entry is! Map) continue;
+        try {
+          final item = Specialization.fromJson(
+            Map<String, dynamic>.from(entry),
+          );
+          if (item.specializationName.isEmpty) continue;
+          result.add(item);
+        } catch (_) {
+          // Skip malformed rows — never fail the whole specialties list.
+        }
+      }
+      return result;
     }
 
     if (response.statusCode == 404) {

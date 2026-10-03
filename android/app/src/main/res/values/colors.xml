@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AppColors.duskMaroon — native splash / system bars -->
+    <color name="splash_maroon">#FF3B0A18</color>
+    <color name="splash_primary">#FFA62639</color>
+</resources>

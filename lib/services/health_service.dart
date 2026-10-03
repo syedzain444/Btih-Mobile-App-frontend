@@ -41,21 +41,40 @@ class HealthService {
   HealthStatus? lastStatus;
   bool get isOnline => lastStatus?.healthy ?? true;
 
-  /// Probe `GET /api/Health`. Returns false on network/5xx failures.
+  /// Probe `GET /api/Health`.
+  /// Returns false only when the API is unreachable (network error).
+  /// HTTP 200–599 means the host responded — including Degraded (503).
   Future<bool> check({bool force = false}) async {
     try {
       final response = await ApiConfig.client
           .get(Uri.parse('${ApiConfig.baseUrl}/api/Health'))
           .timeout(const Duration(seconds: 6));
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        final body = jsonDecode(response.body);
-        if (body is Map<String, dynamic>) {
-          lastStatus = HealthStatus.fromJson(body);
-        } else {
-          lastStatus = const HealthStatus(healthy: true, status: 'Healthy');
+      // Any HTTP response = reachable (online for connectivity UI).
+      if (response.statusCode >= 200 && response.statusCode < 600) {
+        try {
+          final body = jsonDecode(response.body);
+          if (body is Map<String, dynamic>) {
+            lastStatus = HealthStatus.fromJson(body);
+            // Treat Degraded as online — API is up, DB marking may be soft.
+            if (!lastStatus!.healthy &&
+                lastStatus!.status.toLowerCase().contains('degrad')) {
+              lastStatus = HealthStatus(
+                healthy: true,
+                status: lastStatus!.status,
+                database: lastStatus!.database,
+                environment: lastStatus!.environment,
+                checkedAt: lastStatus!.checkedAt,
+                message: lastStatus!.message,
+              );
+            }
+          } else {
+            lastStatus = const HealthStatus(healthy: true, status: 'Healthy');
+          }
+        } catch (_) {
+          lastStatus = const HealthStatus(healthy: true, status: 'Reachable');
         }
-        return lastStatus!.healthy;
+        return true;
       }
 
       lastStatus = HealthStatus(

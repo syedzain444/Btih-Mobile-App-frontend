@@ -2,7 +2,37 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Flutter (Chrome) → VS local :8080",
+      "name": "Phone → .36 (http://172.20.8.36)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "toolArgs": [
+        "--dart-define=API_MODE=production",
+        "--dart-define=API_HOST=http://172.20.8.36"
+      ]
+    },
+    {
+      "name": "Phone → .24 (http://172.16.40.24)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "toolArgs": [
+        "--dart-define=API_MODE=production",
+        "--dart-define=API_HOST=http://172.16.40.24"
+      ]
+    },
+    {
+      "name": "Phone → .93 (http://10.101.1.93:7078)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "toolArgs": [
+        "--dart-define=API_MODE=production",
+        "--dart-define=API_HOST=http://10.101.1.93:7078"
+      ]
+    },
+    {
+      "name": "Chrome → VS local :8080",
       "request": "launch",
       "type": "dart",
       "program": "lib/main.dart",
@@ -14,17 +44,6 @@
         "--disable-web-security",
         "--web-browser-flag",
         "--user-data-dir=${env:TEMP}/btih_chrome_dev"
-      ]
-    },
-    {
-      "name": "Flutter (Android) → VS local :8080",
-      "request": "launch",
-      "type": "dart",
-      "program": "lib/main.dart",
-      "toolArgs": [
-        "--dart-define=API_MODE=local",
-        "--dart-define=API_HOST=http://127.0.0.1:8080",
-        "--dart-define=API_LAN_HOST=172.16.40.53"
       ]
     }
   ]

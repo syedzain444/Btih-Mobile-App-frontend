@@ -434,6 +434,7 @@ class CustomMessageDialog {
     BuildContext context, {
     required VoidCallback onLogin,
     VoidCallback? onForgotPassword,
+    String? message,
   }) {
     return showDialog<void>(
       context: context,
@@ -447,7 +448,8 @@ class CustomMessageDialog {
           ),
         ),
         content: Text(
-          'This mobile number already has a portal account. Please log in or reset your password.',
+          message ??
+              'This mobile number already has a portal account. Please log in or reset your password.',
           style: AppTypography.roboto(fontSize: 14, color: AppColors.greyText),
         ),
         actions: [
@@ -469,6 +471,53 @@ class CustomMessageDialog {
               foregroundColor: AppColors.white,
             ),
             child: const Text('Log In'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Hospital MR exists but no app portal account — guest cannot continue.
+  static Future<void> showHospitalRecordNeedsSignup(
+    BuildContext context, {
+    required VoidCallback onSignUp,
+    String? mrNo,
+  }) {
+    final mrText = (mrNo != null && mrNo.trim().isNotEmpty)
+        ? ' (MR: ${mrNo.trim()})'
+        : '';
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Patient Already in Hospital Records',
+          style: AppTypography.montserrat(
+            fontWeight: FontWeight.w700,
+            color: AppColors.primaryRed,
+          ),
+        ),
+        content: Text(
+          'This mobile number is already linked to a hospital patient$mrText. '
+          'Guest booking is not available for registered patients.\n\n'
+          'Please Sign up to create your app login, or Log in if you already have one.',
+          style: AppTypography.roboto(fontSize: 14, color: AppColors.greyText),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              onSignUp();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryRed,
+              foregroundColor: AppColors.white,
+            ),
+            child: const Text('Sign Up'),
           ),
         ],
       ),

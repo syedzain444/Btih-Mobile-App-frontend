@@ -840,93 +840,70 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
     final statusBg = _statusBackground(appointment.status);
     final department = DashboardHelpers.sanitizeLabel(appointment.purpose);
     final doctor = DashboardHelpers.normalizeDoctorName(appointment.doctorName);
-    final displayId = appointment.appointmentId.isNotEmpty
-        ? appointment.appointmentId
-        : appointment.weekId.toString();
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Material(
         color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         child: InkWell(
           onTap: () => _showAppointmentDetails(appointment),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           child: Ink(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AppColors.fieldBorder),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.shadow.withValues(alpha: 0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
             ),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 38,
+                  height: 38,
                   decoration: BoxDecoration(
                     color: AppColors.softRed,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(
-                    Icons.calendar_month_outlined,
+                    Icons.event_available_rounded,
                     color: AppColors.primaryRed,
-                    size: 22,
+                    size: 18,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Appointment #$displayId',
-                                  style: AppTypography.raleway(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.darkText,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _formatCardDate(appointment),
-                                  style: AppTypography.roboto(
-                                    fontSize: 12,
-                                    color: AppColors.greyText,
-                                  ),
-                                ),
-                              ],
+                            child: Text(
+                              doctor,
+                              style: AppTypography.raleway(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.darkText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
+                              horizontal: 8,
+                              vertical: 3,
                             ),
                             decoration: BoxDecoration(
                               color: statusBg,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
                               appointment.status.isEmpty
                                   ? 'Unknown'
                                   : appointment.status,
-                              style: AppTypography.raleway(
-                                fontSize: 11,
+                              style: AppTypography.roboto(
+                                fontSize: 10,
                                 fontWeight: FontWeight.w700,
                                 color: statusColor,
                               ),
@@ -934,28 +911,28 @@ class _AppointmentsInfoScreenState extends State<AppointmentsInfoScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
-                      _buildDetailRow(
-                        Icons.access_time_rounded,
-                        _formatTimeLine(appointment),
+                      const SizedBox(height: 3),
+                      Text(
+                        [
+                          _formatCardDate(appointment),
+                          _formatTimeLine(appointment),
+                          if (department != null) department,
+                        ].where((e) => e.trim().isNotEmpty).join(' · '),
+                        style: AppTypography.roboto(
+                          fontSize: 12,
+                          color: AppColors.greyText,
+                          height: 1.3,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      if (department != null) ...[
-                        const SizedBox(height: 6),
-                        _buildDetailRow(Icons.place_outlined, department),
-                      ],
-                      const SizedBox(height: 6),
-                      _buildDetailRow(Icons.person_outline_rounded, doctor),
                     ],
                   ),
                 ),
-                const SizedBox(width: 4),
-                Padding(
-                  padding: const EdgeInsets.only(top: 28),
-                  child: Icon(
-                    Icons.chevron_right_rounded,
-                    color: AppColors.primaryRed,
-                    size: 22,
-                  ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppColors.primaryRed.withValues(alpha: 0.75),
+                  size: 20,
                 ),
               ],
             ),

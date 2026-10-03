@@ -98,27 +98,46 @@ class NotificationService extends ChangeNotifier {
     }
 
     try {
-      // Prefer server-grouped inbox for the categorized notifications screen.
+      // Prefer flat inbox (source of truth), then fall back to grouped.
       NotificationInboxResult inbox;
       try {
-        inbox = await _api.getInboxGrouped(
-          mrNo: normalizedMrNo,
-          pageSize: 100,
-        );
-      } catch (_) {
         inbox = await _api.getInbox(
           mrNo: normalizedMrNo,
           pageSize: 100,
         );
+      } catch (_) {
+        inbox = await _api.getInboxGrouped(
+          mrNo: normalizedMrNo,
+          pageSize: 100,
+        );
       }
+
+      // If flat returned empty, try grouped once (some deploys only expose one).
+      if (inbox.notifications.isEmpty) {
+        try {
+          final grouped = await _api.getInboxGrouped(
+            mrNo: normalizedMrNo,
+            pageSize: 100,
+          );
+          if (grouped.notifications.isNotEmpty) {
+            inbox = grouped;
+          }
+        } catch (_) {}
+      }
+
       _notifications = inbox.notifications;
       _serverUnreadCount = inbox.unreadCount;
       _syncedFromServer = true;
       await _persist();
       notifyListeners();
     } catch (_) {
+      // Keep whatever is already in memory; otherwise load local cache.
       _syncedFromServer = false;
-      await _loadFromStorage(normalizedMrNo);
+      if (_notifications.isEmpty) {
+        await _loadFromStorage(normalizedMrNo);
+      } else {
+        notifyListeners();
+      }
     }
   }
 
@@ -193,15 +212,31 @@ class NotificationService extends ChangeNotifier {
       data: message.data,
     );
 
-    if (AuthSession.isLoggedIn && mrNo == AuthSession.mrNo) {
+    if (AuthSession.isLoggedIn &&
+        mrNo == (AuthSession.mrNo?.trim() ?? '')) {
       await syncFromServer(mrNo);
+
+      // Prefer the server row when it already exists (FCM save-on-send).
+      final serverId = message.data['notificationId']?.toString();
+      if (serverId != null &&
+          serverId.isNotEmpty &&
+          _notifications.any((n) => n.id == serverId)) {
+        final match = _notifications.firstWhere((n) => n.id == serverId);
+        await _showDeviceNotification(match);
+        return;
+      }
+
       if (_notifications.isNotEmpty) {
         final latest = _notifications.first;
-        await _showDeviceNotification(latest);
-        return;
+        final sameTitle = latest.title == title && latest.body == body;
+        if (sameTitle) {
+          await _showDeviceNotification(latest);
+          return;
+        }
       }
     }
 
+    // Backfill: record into PATIENT_NOTIFICATION if server row is missing.
     await _addNotification(
       mrNo: mrNo,
       type: mapped.type,
@@ -419,6 +454,32 @@ class NotificationService extends ChangeNotifier {
       payload: {
         'doctorName': doctorName,
         if (followUpDate != null) 'followUpDate': followUpDate,
+      },
+    );
+  }
+
+  Future<void> notifyAppointmentFastingReminder({
+    required String mrNo,
+    required String prepKind,
+    required String instructions,
+    String? appointmentTime,
+    String? doctorName,
+  }) {
+    final kindLabel = prepKind.toUpperCase().contains('GASTRO')
+        ? 'Gastroenterology'
+        : 'Radiology';
+    return _addNotification(
+      mrNo: mrNo,
+      type: NotificationType.appointmentFastingReminder,
+      category: NotificationCategory.appointments,
+      priority: NotificationPriority.high,
+      title: '$kindLabel preparation reminder',
+      body: instructions,
+      payload: {
+        'prepKind': prepKind,
+        'screen': 'appointments',
+        if (appointmentTime != null) 'appointmentTime': appointmentTime,
+        if (doctorName != null) 'doctorName': doctorName,
       },
     );
   }

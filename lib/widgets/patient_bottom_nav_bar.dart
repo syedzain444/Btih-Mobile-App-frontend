@@ -14,6 +14,7 @@ class PatientBottomNavBar extends StatelessWidget {
   });
 
   static const dashboardIndex = 2;
+  static const moreIndex = 4;
 
   final int selectedIndex;
   final ValueChanged<int> onSelected;
@@ -43,9 +44,9 @@ class PatientBottomNavBar extends StatelessWidget {
       label: 'Records',
     ),
     (
-      icon: Icons.receipt_long_outlined,
-      activeIcon: Icons.receipt_long_rounded,
-      label: 'Billing',
+      icon: Icons.grid_view_rounded,
+      activeIcon: Icons.grid_view_rounded,
+      label: 'More',
     ),
   ];
 

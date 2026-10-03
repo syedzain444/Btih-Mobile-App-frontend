@@ -206,11 +206,15 @@ class _CreateSupportTicketScreenState extends State<CreateSupportTicketScreen> {
   bool _submitting = false;
 
   static const _categories = [
+    'Complaint',
+    'Suggestion',
     'General',
     'Billing',
     'Appointments',
     'Technical',
     'Medical Records',
+    'Service Quality',
+    'Other',
   ];
 
   @override

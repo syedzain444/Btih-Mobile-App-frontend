@@ -179,7 +179,7 @@ class _TelemedicineScreenState extends State<TelemedicineScreen> {
                   _buildScheduleCard(),
                   const SizedBox(height: 20),
                   Text(
-                    'Your sessions',
+                    'Your Sessions',
                     style: AppTypography.raleway(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
@@ -224,7 +224,7 @@ class _TelemedicineScreenState extends State<TelemedicineScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.blush,
+        color: AppColors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.softRed),
       ),
@@ -232,11 +232,11 @@ class _TelemedicineScreenState extends State<TelemedicineScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Schedule a video visit',
+            'Schedule A Video Visit',
             style: AppTypography.raleway(
               fontSize: 15,
               fontWeight: FontWeight.w700,
-              color: AppColors.deepRed,
+              color: AppColors.primaryRed,
             ),
           ),
           const SizedBox(height: 8),

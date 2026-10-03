@@ -8,6 +8,7 @@ enum NotificationCategory {
   records,
   billing,
   messaging,
+  support,
   security,
   general,
 }
@@ -20,6 +21,7 @@ enum NotificationType {
   appointmentRescheduled,
   appointmentReminder,
   followUpReminder,
+  appointmentFastingReminder,
 
   // Reports / records
   labReportAvailable,
@@ -41,6 +43,11 @@ enum NotificationType {
   // Messaging
   messageReceived,
   messageThreadClosed,
+
+  // Support / complaints
+  supportTicketSubmitted,
+  supportTicketUpdated,
+  supportTicketReply,
 
   // Profile / security
   profileUpdated,
@@ -121,13 +128,23 @@ class AppNotification {
     final priorityKey = (json['priority'] ?? 'normal').toString();
 
     final type = NotificationTypeX.fromWire(typeKey);
+    var category = NotificationCategoryX.fromWire(
+      categoryKey,
+      fallbackType: type,
+    );
+    // Profile / security alerts must never appear under Hospital Updates.
+    if (type.defaultCategory == NotificationCategory.security) {
+      category = NotificationCategory.security;
+    }
+    // Medication reminders stay in their own Medications tab.
+    if (type.defaultCategory == NotificationCategory.medications) {
+      category = NotificationCategory.medications;
+    }
+
     return AppNotification(
       id: rawId?.toString() ?? '',
       type: type,
-      category: NotificationCategoryX.fromWire(
-        categoryKey,
-        fallbackType: type,
-      ),
+      category: category,
       priority: NotificationPriorityX.fromWire(priorityKey),
       title: json['title'] as String? ?? 'Notification',
       body: json['body'] as String? ?? '',
@@ -203,6 +220,8 @@ extension NotificationTypeX on NotificationType {
         return 'appointment_reminder';
       case NotificationType.followUpReminder:
         return 'follow_up_reminder';
+      case NotificationType.appointmentFastingReminder:
+        return 'appointment_fasting_reminder';
       case NotificationType.labReportAvailable:
         return 'lab_report_ready';
       case NotificationType.gastroReportAvailable:
@@ -229,6 +248,12 @@ extension NotificationTypeX on NotificationType {
         return 'message_received';
       case NotificationType.messageThreadClosed:
         return 'message_thread_closed';
+      case NotificationType.supportTicketSubmitted:
+        return 'support_ticket_submitted';
+      case NotificationType.supportTicketUpdated:
+        return 'support_ticket_updated';
+      case NotificationType.supportTicketReply:
+        return 'support_ticket_reply';
       case NotificationType.profileUpdated:
         return 'profile_updated';
       case NotificationType.passwordChanged:
@@ -256,6 +281,7 @@ extension NotificationTypeX on NotificationType {
       case NotificationType.appointmentRescheduled:
       case NotificationType.appointmentReminder:
       case NotificationType.followUpReminder:
+      case NotificationType.appointmentFastingReminder:
         return NotificationCategory.appointments;
       case NotificationType.labReportAvailable:
         return NotificationCategory.lab;
@@ -275,6 +301,10 @@ extension NotificationTypeX on NotificationType {
       case NotificationType.messageReceived:
       case NotificationType.messageThreadClosed:
         return NotificationCategory.messaging;
+      case NotificationType.supportTicketSubmitted:
+      case NotificationType.supportTicketUpdated:
+      case NotificationType.supportTicketReply:
+        return NotificationCategory.support;
       case NotificationType.profileUpdated:
       case NotificationType.passwordChanged:
       case NotificationType.appPinChanged:
@@ -292,10 +322,12 @@ extension NotificationTypeX on NotificationType {
     switch (this) {
       case NotificationType.appointmentReminder:
       case NotificationType.appointmentCancelled:
+      case NotificationType.appointmentFastingReminder:
       case NotificationType.labReportAvailable:
       case NotificationType.medicationReminder:
       case NotificationType.paymentPending:
       case NotificationType.messageReceived:
+      case NotificationType.supportTicketReply:
       case NotificationType.newLoginAlert:
       case NotificationType.passwordChanged:
         return NotificationPriority.high;
@@ -327,6 +359,11 @@ extension NotificationTypeX on NotificationType {
     if (key.contains('appointment') && key.contains('remind')) {
       return NotificationType.appointmentReminder;
     }
+    if (key.contains('fasting') ||
+        key.contains('prep') ||
+        (key.contains('appointment') && key.contains('fast'))) {
+      return NotificationType.appointmentFastingReminder;
+    }
     if (key.contains('appointment') && key.contains('cancel')) {
       return NotificationType.appointmentCancelled;
     }
@@ -355,6 +392,15 @@ extension NotificationTypeX on NotificationType {
       return NotificationType.messageThreadClosed;
     }
     if (key.contains('message')) return NotificationType.messageReceived;
+    if (key.contains('support') && key.contains('reply')) {
+      return NotificationType.supportTicketReply;
+    }
+    if (key.contains('support') && key.contains('updated')) {
+      return NotificationType.supportTicketUpdated;
+    }
+    if (key.contains('support') || key.contains('ticket') || key.contains('complaint')) {
+      return NotificationType.supportTicketSubmitted;
+    }
     if (key.contains('password')) return NotificationType.passwordChanged;
     if (key.contains('pin')) return NotificationType.appPinChanged;
     if (key.contains('trusted') && key.contains('removed')) {
@@ -384,6 +430,8 @@ extension NotificationCategoryX on NotificationCategory {
         return 'Billing';
       case NotificationCategory.messaging:
         return 'Messages';
+      case NotificationCategory.support:
+        return 'Complaints & Support';
       case NotificationCategory.security:
         return 'Security';
       case NotificationCategory.general:
@@ -405,8 +453,10 @@ extension NotificationCategoryX on NotificationCategory {
         return 'Bills, dues, and payment confirmations';
       case NotificationCategory.messaging:
         return 'Messages from hospital staff';
+      case NotificationCategory.support:
+        return 'Ticket updates and hospital replies';
       case NotificationCategory.security:
-        return 'Password, PIN, devices, and logins';
+        return 'Password, PIN, profile, devices, and logins';
       case NotificationCategory.general:
         return 'Announcements and hospital news';
     }
@@ -419,6 +469,7 @@ extension NotificationCategoryX on NotificationCategory {
     NotificationCategory.records,
     NotificationCategory.billing,
     NotificationCategory.messaging,
+    NotificationCategory.support,
     NotificationCategory.security,
     NotificationCategory.general,
   ];

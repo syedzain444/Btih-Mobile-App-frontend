@@ -1,4 +1,3 @@
-import 'package:btih_andriod_app/screens/support/support_tickets_screen.dart';
 import 'package:btih_andriod_app/services/support_service.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
@@ -83,6 +82,60 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+
+  void _showHoursSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          12,
+          20,
+          20 + MediaQuery.paddingOf(ctx).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.fieldBorder,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Operating Hours',
+              style: AppTypography.raleway(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppColors.deepRed,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _contact.workingHours.isNotEmpty
+                  ? _contact.workingHours
+                  : '24/7 Emergency',
+              style: AppTypography.roboto(
+                fontSize: 14,
+                color: AppColors.darkText,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showFaqAnswer(SupportFaqItem item) {
@@ -308,58 +361,12 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                       ),
                       _ContactCard(
                         icon: Icons.access_time_rounded,
-                        title: 'Hours',
+                        title: 'Operating Hours',
                         subtitle: 'Working Hours',
                         detail: hoursDisplay,
-                        onTap: () {},
+                        onTap: _showHoursSheet,
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 24),
-                  TapFeedback(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const SupportTicketsScreen(),
-                        ),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 14,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.blush,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.softRed),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.confirmation_number_outlined,
-                            color: AppColors.primaryRed,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              'Support tickets',
-                              style: AppTypography.raleway(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.darkText,
-                              ),
-                            ),
-                          ),
-                          const Icon(
-                            Icons.chevron_right_rounded,
-                            color: AppColors.primaryRed,
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                   const SizedBox(height: 28),
                   Row(

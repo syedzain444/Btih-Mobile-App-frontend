@@ -20,7 +20,7 @@ Future<GuestProfileRequiredAction> showGuestProfileRequiredDialog(
           ),
         ),
         content: Text(
-          'Visit the Doctors section, register yourself, \nfind a doctor and book your appointment.',
+          'Visit the Doctors, find a doctor, register yourself and book your appointment.',
           style: AppTypography.roboto(fontSize: 14, color: AppColors.greyText),
         ),
         actions: [

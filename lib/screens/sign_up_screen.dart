@@ -14,11 +14,10 @@ import 'package:btih_andriod_app/utils/auth_validation.dart';
 import 'package:btih_andriod_app/widgets/app_primary_button.dart';
 import 'package:btih_andriod_app/widgets/custom_message_dialog.dart';
 import 'package:btih_andriod_app/widgets/login_wave_header.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:btih_andriod_app/widgets/otp_autofill_field.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:sms_autofill/sms_autofill.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -27,9 +26,10 @@ class SignUpScreen extends StatefulWidget {
   State<SignUpScreen> createState() => _SignUpScreenState();
 }
 
-class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
+class _SignUpScreenState extends State<SignUpScreen> {
   final _phoneController = TextEditingController();
   final _otpController = TextEditingController();
+  final _otpFocusNode = FocusNode();
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -55,37 +55,26 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
     _phoneController.addListener(() {
       if (mounted) setState(() {});
     });
-    _listenForSmsOtp();
+  }
+
+  void _prepareOtpAutofill() {
+    unawaited(ensureSmsOtpListening());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _otpFocusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
-    if (!kIsWeb) {
-      cancel();
-    }
     _phoneController.dispose();
     _otpController.dispose();
+    _otpFocusNode.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     _timer?.cancel();
     super.dispose();
-  }
-
-  void _listenForSmsOtp() {
-    if (kIsWeb) return;
-    try {
-      listenForCode();
-    } catch (_) {}
-  }
-
-  @override
-  void codeUpdated() {
-    final received = code?.trim();
-    if (received == null || received.length != 6) return;
-    _otpController.text = received;
-    if (mounted) setState(() {});
   }
 
   void _startTimer({int seconds = 120}) {
@@ -123,7 +112,7 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
             ? expiresInMinutes * 60
             : 120,
       );
-      _listenForSmsOtp();
+      _prepareOtpAutofill();
 
       if (showDialog) {
         final debugOtp = AuthService.extractDebugOtp(response);
@@ -190,6 +179,7 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
       if (!mounted || !otpSent) return;
 
       setState(() => _step = 2);
+      _prepareOtpAutofill();
     } on AuthApiException catch (e) {
       if (!mounted) return;
       if (e.type == AuthErrorType.unauthorized) {
@@ -239,8 +229,10 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
       CustomMessageDialog.showError(context, passwordError);
       return;
     }
-    if (password != confirm) {
-      CustomMessageDialog.showError(context, 'Passwords do not match');
+    final matchError =
+        AuthValidation.validateConfirmPassword(password, confirm);
+    if (matchError != null) {
+      CustomMessageDialog.showError(context, matchError);
       return;
     }
     if (!_acceptTerms) {
@@ -352,6 +344,7 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
   void _handleBack() {
     if (_step == 3) {
       setState(() => _step = 2);
+      _prepareOtpAutofill();
       return;
     }
     if (_step == 2) {
@@ -518,24 +511,23 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
                     _buildLoginLink(),
                   ],
                   if (_step == 2) ...[
-                    AutofillGroup(
-                      child: TextField(
-                        controller: _otpController,
-                        keyboardType: TextInputType.number,
-                        maxLength: 6,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        textAlign: TextAlign.center,
-                        style: AppTypography.roboto(
-                          fontSize: 22,
-                          letterSpacing: 8,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.darkText,
-                        ),
-                        decoration: authUnderlineFieldDecoration(
-                          hint: '000000',
-                          counterText: '',
-                        ),
+                    Text(
+                      'Tap the code above your keyboard when the SMS arrives, or type it manually.',
+                      textAlign: TextAlign.center,
+                      style: AppTypography.roboto(
+                        fontSize: 12,
+                        color: AppColors.greyText,
+                        height: 1.35,
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    OtpAutofillField(
+                      controller: _otpController,
+                      focusNode: _otpFocusNode,
+                      enabled: !_loading && !_sendingOtp,
+                      onCompleted: (_) {
+                        if (!_loading && !_sendingOtp) _continueFromOtp();
+                      },
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -622,7 +614,16 @@ class _SignUpScreenState extends State<SignUpScreen> with CodeAutoFill {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 8),
+                    Text(
+                      AuthValidation.passwordPolicySummary,
+                      style: AppTypography.roboto(
+                        fontSize: 11,
+                        color: AppColors.greyText,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: _confirmPasswordController,
                       obscureText: _obscureConfirm,

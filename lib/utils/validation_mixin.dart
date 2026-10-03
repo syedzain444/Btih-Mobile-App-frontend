@@ -1,3 +1,5 @@
+import 'package:btih_andriod_app/utils/auth_validation.dart';
+
 mixin ValidationMixin {
   String? validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) {
@@ -12,15 +14,9 @@ mixin ValidationMixin {
     return null;
   }
 
-  String? validatePassword(String? value) {
-    if (value == null || value.isEmpty) return 'Password required';
-    if (value.length < 6) return 'Password must be at least 6 characters';
-    return null;
-  }
+  String? validatePassword(String? value) =>
+      AuthValidation.validatePassword(value);
 
-  String? validateConfirmPassword(String? password, String? confirm) {
-    if (confirm == null || confirm.isEmpty) return 'Confirm your password';
-    if (password != confirm) return 'Passwords do not match';
-    return null;
-  }
+  String? validateConfirmPassword(String? password, String? confirm) =>
+      AuthValidation.validateConfirmPassword(password, confirm);
 }

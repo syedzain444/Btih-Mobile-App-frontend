@@ -1098,6 +1098,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/services/recent_activity_service.dart';
+import 'package:btih_andriod_app/services/report_pdf_cache_service.dart';
 import 'package:btih_andriod_app/utils/download_location_helper.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
 import 'package:btih_andriod_app/utils/report_download_helper.dart';
@@ -1106,7 +1107,6 @@ import 'package:flutter/material.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'dart:convert';
 import 'package:dio/dio.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:share_plus/share_plus.dart';
@@ -1162,11 +1162,19 @@ class _ReportPdfRequest {
   final String url;
   final String fileName;
   final String displayTitle;
+  final String cacheKey;
+  final String rptId;
+  final String reportName;
+  final String parameters;
 
   const _ReportPdfRequest({
     required this.url,
     required this.fileName,
     required this.displayTitle,
+    required this.cacheKey,
+    required this.rptId,
+    required this.reportName,
+    required this.parameters,
   });
 }
 
@@ -1218,6 +1226,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String? errorMessage;
   late int _selectedCategoryIndex;
   bool _reportDownloadInProgress = false;
+  bool _reportOpenInProgress = false;
   bool _didAutoOpenReport = false;
 
   // Color scheme
@@ -1851,7 +1860,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
-  Widget _buildMaroonLoadingDialog({required String title, required String subtitle}) {
+  Widget _buildMaroonLoadingDialog({
+    required String title,
+    required ValueNotifier<String> subtitle,
+  }) {
     return Dialog(
       elevation: 0,
       backgroundColor: Colors.transparent,
@@ -1875,7 +1887,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               width: 60,
               height: 60,
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppColors.softRed,
                 shape: BoxShape.circle,
               ),
@@ -1895,16 +1907,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: AppTypography.roboto(
-                fontSize: 14,
-                color: AppColors.greyText,
-              ),
+            ValueListenableBuilder<String>(
+              valueListenable: subtitle,
+              builder: (context, text, _) {
+                return Text(
+                  text,
+                  style: AppTypography.roboto(
+                    fontSize: 14,
+                    color: AppColors.greyText,
+                  ),
+                  textAlign: TextAlign.center,
+                );
+              },
             ),
             const SizedBox(height: 4),
             Text(
-              'Please wait...',
+              'Please wait…',
               style: AppTypography.roboto(
                 fontSize: 12,
                 color: AppColors.greyText,
@@ -1926,42 +1944,105 @@ class _ReportsScreenState extends State<ReportsScreen> {
     } else {
       return false;
     }
-    if (bytes.length < 4) return false;
-    return bytes[0] == 0x25 &&
-        bytes[1] == 0x50 &&
-        bytes[2] == 0x44 &&
-        bytes[3] == 0x46;
+    return ReportPdfCacheService.looksLikePdf(bytes);
   }
 
-  Future<void> _downloadReport(String url, String fileName, String reportName) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) => _buildMaroonLoadingDialog(
-        title: reportName,
-        subtitle: 'Downloading report',
-      ),
-    );
+  /// Hospital-network oriented timeouts (REQ-2026-020 ≤5s target with feedback).
+  Dio _reportPdfDio() {
+    final dio = ApiConfig.createDio();
+    dio.options.connectTimeout = const Duration(seconds: 5);
+    dio.options.receiveTimeout = const Duration(seconds: 12);
+    dio.options.sendTimeout = const Duration(seconds: 5);
+    return dio;
+  }
 
+  Future<List<int>> _fetchReportPdfBytes(
+    _ReportPdfRequest request, {
+    ValueNotifier<String>? status,
+  }) async {
+    status?.value = 'Fetching from hospital server…';
+    final dio = _reportPdfDio();
     try {
-      final dio = ApiConfig.createDio();
-      dio.options.connectTimeout = const Duration(seconds: 60);
-      dio.options.receiveTimeout = const Duration(seconds: 60);
-
-      final response = await dio.get(
-        url,
+      final response = await dio.get<List<int>>(
+        request.url,
         options: Options(responseType: ResponseType.bytes),
       );
 
       final contentType = response.headers.value('content-type');
-      if (!_looksLikePdf(response.data) &&
-          (contentType == null || !contentType.contains('application/pdf'))) {
+      final bytes = response.data;
+      if (bytes == null ||
+          (!_looksLikePdf(bytes) &&
+              (contentType == null ||
+                  !contentType.contains('application/pdf')))) {
         throw Exception('Server did not return a valid PDF');
       }
+      return bytes;
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        throw Exception(
+          'Report is taking too long on the hospital network. '
+          'Please try again in a moment.',
+        );
+      }
+      rethrow;
+    }
+  }
 
+  Future<File> _resolveReportPdfFile(
+    _ReportPdfRequest request, {
+    required ValueNotifier<String> status,
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh) {
+      status.value = 'Checking local cache…';
+      final cached = await ReportPdfCacheService.getCachedFile(request.cacheKey);
+      if (cached != null) {
+        status.value = 'Opening cached report…';
+        return cached;
+      }
+    }
+
+    final bytes = await _fetchReportPdfBytes(request, status: status);
+    status.value = 'Saving report…';
+    return ReportPdfCacheService.putBytes(
+      cacheKey: request.cacheKey,
+      bytes: bytes,
+    );
+  }
+
+  Future<void> _downloadReport(
+    _ReportPdfRequest request,
+  ) async {
+    final status = ValueNotifier<String>('Preparing download…');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) => _buildMaroonLoadingDialog(
+        title: request.displayTitle,
+        subtitle: status,
+      ),
+    );
+
+    try {
+      List<int> bytes;
+      final cached = await ReportPdfCacheService.getCachedBytes(request.cacheKey);
+      if (cached != null) {
+        status.value = 'Using cached report…';
+        bytes = cached;
+      } else {
+        bytes = await _fetchReportPdfBytes(request, status: status);
+        await ReportPdfCacheService.putBytes(
+          cacheKey: request.cacheKey,
+          bytes: bytes,
+        );
+      }
+
+      status.value = 'Saving to device…';
       final savedFile = await ReportDownloadHelper.savePdfBytes(
-        bytes: response.data,
-        fileName: fileName,
+        bytes: bytes,
+        fileName: request.fileName,
       );
 
       if (!mounted) return;
@@ -1985,6 +2066,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
         context,
         'Download failed. Please try again.\n\n${e.toString()}',
       );
+    } finally {
+      status.dispose();
     }
   }
 
@@ -2105,9 +2188,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   void _openReport(Map<String, dynamic> report) async {
+    if (_reportOpenInProgress) return;
+
     final request = _resolveReportPdfRequest(report);
     if (request == null) return;
 
+    _reportOpenInProgress = true;
     final categoryLabel =
         (categories[_selectedCategoryIndex]['name'] as String?) ?? 'Report';
     RecentActivityService.instance.trackMedicalReport(
@@ -2119,47 +2205,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
       report: report,
     );
 
+    final status = ValueNotifier<String>('Preparing report…');
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) => _buildMaroonLoadingDialog(
         title: request.displayTitle,
-        subtitle: 'Generating your report',
+        subtitle: status,
       ),
     );
 
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final filePath = '${dir.path}/${request.fileName}';
-
-      final dio = ApiConfig.createDio();
-      dio.options.connectTimeout = const Duration(seconds: 60);
-      dio.options.receiveTimeout = const Duration(seconds: 60);
-
-      final response = await dio.get(
-        request.url,
-        options: Options(responseType: ResponseType.bytes),
-      );
-
-      final contentType = response.headers.value("content-type");
-      final bytes = response.data;
-      if (!_looksLikePdf(bytes) &&
-          (contentType == null || !contentType.contains("application/pdf"))) {
-        if (mounted && Navigator.canPop(context)) {
-          Navigator.pop(context);
-        }
-        throw Exception("Server did not return a valid PDF");
-      }
-
-      final file = File(filePath);
-      await file.writeAsBytes(bytes, flush: true);
+      final file = await _resolveReportPdfFile(request, status: status);
 
       if (!mounted) return;
       if (Navigator.canPop(context)) {
         Navigator.pop(context);
       }
 
-      _openPDF(filePath, request.fileName);
+      _openPDF(file.path, request.fileName);
     } catch (e) {
       if (!mounted) return;
       if (Navigator.canPop(context)) {
@@ -2171,7 +2235,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
             children: [
               const Icon(Icons.error_outline, color: Colors.white),
               const SizedBox(width: 8),
-              Expanded(child: Text("Error generating report: ${e.toString()}")),
+              Expanded(
+                child: Text(
+                  e.toString().replaceFirst('Exception: ', ''),
+                ),
+              ),
             ],
           ),
           backgroundColor: Colors.red,
@@ -2181,18 +2249,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ),
       );
+    } finally {
+      status.dispose();
+      _reportOpenInProgress = false;
     }
   }
 
   Future<void> _downloadReportRecord(Map<String, dynamic> report) async {
-    if (_reportDownloadInProgress) return;
+    if (_reportDownloadInProgress || _reportOpenInProgress) return;
 
     final request = _resolveReportPdfRequest(report);
     if (request == null) return;
 
     _reportDownloadInProgress = true;
     try {
-      await _downloadReport(request.url, request.fileName, request.displayTitle);
+      await _downloadReport(request);
     } finally {
       _reportDownloadInProgress = false;
     }
@@ -2289,11 +2360,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
         "&reportName=${Uri.encodeQueryComponent(reportName)}"
         "&parameters=${Uri.encodeQueryComponent(parameters)}"
         "&user=MobileApp";
+    final cacheKey = ReportPdfCacheService.buildKey(
+      rptId: rptId,
+      reportName: reportName,
+      parameters: parameters,
+    );
 
     return _ReportPdfRequest(
       url: url,
       fileName: fileName,
       displayTitle: displayTitle,
+      cacheKey: cacheKey,
+      rptId: rptId,
+      reportName: reportName,
+      parameters: parameters,
     );
   }
 

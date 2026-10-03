@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:btih_andriod_app/services/auth_exceptions.dart';
 import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:btih_andriod_app/services/trusted_device_service.dart';
+import 'package:btih_andriod_app/utils/auth_validation.dart';
 import 'package:btih_andriod_app/utils/ip_file.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:http/http.dart' as http;
@@ -68,14 +69,34 @@ class AuthService {
 
   AuthApiException _parseErrorResponse(http.Response response) {
     final decoded = _decodeMap(response.body);
-    final message = decoded?['message']?.toString() ??
-        'Request failed (${response.statusCode})';
+    final message = (decoded?['message']?.toString() ??
+            'Request failed (${response.statusCode})')
+        .trim();
     final errors = decoded?['errors'] is List
-        ? (decoded!['errors'] as List).map((e) => e.toString()).toList()
+        ? (decoded!['errors'] as List)
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList()
         : <String>[];
 
+    // Avoid repeating the same line when API sends identical message + errors.
+    final uniqueDetails = <String>[];
+    final seen = <String>{message.toLowerCase()};
+    for (final error in errors) {
+      final key = error.toLowerCase();
+      if (seen.add(key)) {
+        uniqueDetails.add(error);
+      }
+    }
+
+    final combined = uniqueDetails.isEmpty
+        ? message
+        : (message.isEmpty
+            ? uniqueDetails.join('\n')
+            : '$message\n${uniqueDetails.join('\n')}');
+
     return AuthApiException(
-      errors.isNotEmpty ? '$message\n${errors.join('\n')}' : message,
+      combined,
       type: _typeFromStatus(response.statusCode),
       statusCode: response.statusCode,
       errors: errors,
@@ -93,6 +114,7 @@ class AuthService {
 
     for (var attempt = 0; attempt < (retryOnNetworkError ? 2 : 1); attempt++) {
       if (attempt > 0) {
+        // Keep a host we just recovered to (e.g. .93 after tunnel refused).
         // Keep a host we just recovered to (e.g. .93 after tunnel refused).
         // Only re-resolve if nothing is pinned yet.
         if (!ApiConfig.isResolved) {
@@ -178,7 +200,7 @@ class AuthService {
           throw AuthApiException(
             'Cannot reach the API (${ApiConfig.baseUrl}).\n\n'
             'Join hospital Wi‑Fi and open ${ApiConfig.productionSwaggerUrl}\n'
-            'or run run-dev.bat option 3 (USB tunnel) with the phone connected.',
+            'or rebuild with RUN.bat (option 1 or 3 for .24).',
             type: AuthErrorType.network,
           );
         }
@@ -203,12 +225,12 @@ class AuthService {
       await ApiConfig.preferDirectProduction();
       return;
     }
-    if (ApiConfig.baseUrl.contains(ApiConfig.productionApiHost)) {
-      // Direct .93 failed → try USB tunnel only if it responds.
-      final switched = await ApiConfig.preferProductionUsbTunnel();
-      if (!switched) {
-        ApiConfig.invalidate();
-      }
+    // Standalone APK on Wi‑Fi must stay on the hospital host.
+    // Do NOT switch to 127.0.0.1 USB tunnel unless we were already using it.
+    final host = ApiConfig.baseUrl;
+    if (host.contains(ApiConfig.apiHost36) ||
+        host.contains(ApiConfig.apiHost24) ||
+        host.contains(ApiConfig.apiHost93)) {
       return;
     }
     ApiConfig.invalidate();
@@ -219,9 +241,10 @@ class AuthService {
     if (raw.contains('Connection refused') &&
         (raw.contains('127.0.0.1:7078') || raw.contains('127.0.0.1'))) {
       return 'USB tunnel is not running (connection refused to 127.0.0.1:7078).\n\n'
-          'Fix one of these:\n'
-          '1. Run run-dev.bat → option 3 with the phone on USB\n'
-          '2. Or join hospital Wi‑Fi so the app can use ${ApiConfig.productionBaseUrl}';
+          'Use RUN.bat instead:\n'
+          '1. Option 1 — phone on Wi‑Fi → .24\n'
+          '2. Option 2 — phone on Wi‑Fi → .93\n'
+          'API: ${ApiConfig.productionBaseUrl}';
     }
     return _networkErrorMessage(error);
   }
@@ -273,30 +296,24 @@ class AuthService {
     }
 
     final trimmedContact = contactNo.trim();
+    final isMr = AuthValidation.isMrNumber(trimmedContact);
     final body = <String, dynamic>{
       'contactNo': trimmedContact,
       'password': password,
     };
 
-    // SMS bypass number: omit deviceInstallId so the server returns a full
-    // login success without OTP (works even if backend allowlist is not deployed).
-    final smsBypass =
-        TrustedDeviceService.isTemporarySmsBypassContact(trimmedContact);
-
-    if (useTrustedDevice && !smsBypass) {
+    // Always send device identity so the API can require OTP on new / untrusted devices.
+    if (useTrustedDevice) {
       try {
         body.addAll(
           await TrustedDeviceService.buildLoginDevicePayload(
-            contactNo: trimmedContact,
+            contactNo: isMr ? '' : trimmedContact,
+            mrNo: isMr ? trimmedContact : null,
           ),
         );
       } catch (e) {
         debugPrint('Trusted device payload skipped: $e');
       }
-    } else if (smsBypass) {
-      debugPrint(
-        'SMS bypass contact $trimmedContact — skipping device/OTP challenge',
-      );
     }
 
     final response = await _request(
@@ -305,8 +322,12 @@ class AuthService {
       body: body,
     );
 
+    final resolvedContact = response['maskedContactNo']?.toString() ??
+        response['contactNo']?.toString() ??
+        (isMr ? '' : trimmedContact);
+
     await _persistDeviceTrustToken(
-      contactNo: trimmedContact,
+      contactNo: resolvedContact.isNotEmpty ? resolvedContact : trimmedContact,
       response: response,
     );
 
@@ -319,12 +340,16 @@ class AuthService {
   }) async {
     final trustToken = response['deviceTrustToken']?.toString();
     final mrNo = response['mrNo']?.toString();
+    final resolvedContact = response['contactNo']?.toString().trim();
+    final saveContact = (resolvedContact != null && resolvedContact.isNotEmpty)
+        ? resolvedContact
+        : contactNo;
     if (trustToken != null &&
         trustToken.isNotEmpty &&
         mrNo != null &&
         mrNo.isNotEmpty) {
       await TrustedDeviceService.saveTrustToken(
-        contactNo: contactNo,
+        contactNo: saveContact,
         mrNo: mrNo,
         token: trustToken,
       );

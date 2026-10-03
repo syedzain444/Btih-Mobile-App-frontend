@@ -13,13 +13,25 @@ class ProfilePhotoService {
     required String mrNo,
     required File file,
   }) async {
+    if (!await file.exists()) {
+      throw Exception('Selected photo file was not found');
+    }
+
+    final length = await file.length();
+    if (length <= 0) {
+      throw Exception('Selected photo file is empty');
+    }
+    if (length > 5 * 1024 * 1024) {
+      throw Exception('Photo must be 5 MB or smaller');
+    }
+
     final uri = Uri.parse(
       '${ApiConfig.baseUrl}/api/Patient/profile/photo?mrNo=${Uri.encodeQueryComponent(mrNo)}',
     );
 
     final request = http.MultipartRequest('POST', uri);
     request.headers.addAll(AuthSession.authHeaders);
-    // Let multipart set its own boundary Content-Type.
+    // Multipart must set its own boundary Content-Type.
     request.headers.remove('Content-Type');
 
     var extension = p.extension(file.path).toLowerCase().replaceFirst('.', '');
@@ -46,7 +58,9 @@ class ProfilePhotoService {
       ),
     );
 
-    final streamed = await request.send().timeout(ApiConfig.requestTimeout);
+    final streamed = await ApiConfig.client
+        .send(request)
+        .timeout(ApiConfig.requestTimeout);
     final response = await http.Response.fromStream(streamed);
     final decoded = _decode(response.body);
 
@@ -57,9 +71,12 @@ class ProfilePhotoService {
       return resolved;
     }
 
+    final detail = decoded?['detail']?.toString();
+    final message = decoded?['message']?.toString();
     throw Exception(
-      decoded?['message']?.toString() ??
-          'Failed to upload photo (HTTP ${response.statusCode})',
+      (detail != null && detail.isNotEmpty)
+          ? '$message ($detail)'
+          : (message ?? 'Failed to upload photo (HTTP ${response.statusCode})'),
     );
   }
 

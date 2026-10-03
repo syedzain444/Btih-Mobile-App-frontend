@@ -8,33 +8,29 @@ import 'package:btih_andriod_app/screens/discharge_history_screen.dart';
 import 'package:btih_andriod_app/screens/doctor_schedule_screen.dart';
 import 'package:btih_andriod_app/screens/login_screen.dart';
 import 'package:btih_andriod_app/screens/notifications_screen.dart';
-import 'package:btih_andriod_app/screens/guest_patient_info_screen.dart';
 import 'package:btih_andriod_app/models/current_medication_model.dart';
 import 'package:btih_andriod_app/services/auth_session.dart';
 import 'package:btih_andriod_app/services/guest_session.dart';
 import 'package:btih_andriod_app/services/medication_service.dart';
 import 'package:btih_andriod_app/services/notification_service.dart';
 import 'package:btih_andriod_app/services/recent_activity_service.dart';
-import 'package:btih_andriod_app/screens/telemedicine_screen.dart';
+import 'package:btih_andriod_app/screens/more/more_hub_screen.dart';
 import 'package:btih_andriod_app/screens/welcome_screen.dart';
 import 'package:btih_andriod_app/screens/medication_reminders_screen.dart';
 import 'package:btih_andriod_app/screens/messaging/message_inbox_screen.dart';
 import 'package:btih_andriod_app/screens/patient_profile_screen.dart';
-import 'package:btih_andriod_app/screens/settings/help_support_screen.dart';
 import 'package:btih_andriod_app/screens/settings/notification_preferences_screen.dart';
 import 'package:btih_andriod_app/screens/settings/security_settings_screen.dart';
-import 'package:btih_andriod_app/screens/settings/settings_static_screen.dart';
 import 'package:btih_andriod_app/screens/patient_records_screen.dart';
-import 'package:btih_andriod_app/screens/patient_report_history_screen.dart';
 import 'package:btih_andriod_app/screens/reports_screen.dart';
 import 'package:btih_andriod_app/screens/visit_history_screen.dart';
 import 'package:btih_andriod_app/theme/app_colors.dart';
 import 'package:btih_andriod_app/widgets/billing/invoice_details_modal.dart';
 import 'package:btih_andriod_app/widgets/guest_profile_required_dialog.dart';
-import 'package:btih_andriod_app/widgets/offline_banner.dart';
 import 'package:btih_andriod_app/widgets/patient_avatar.dart';
 import 'package:btih_andriod_app/widgets/patient_bottom_nav_bar.dart';
 import 'package:btih_andriod_app/services/profile_photo_service.dart';
+import 'package:btih_andriod_app/services/health_service.dart';
 import 'package:btih_andriod_app/widgets/tap_feedback.dart';
 import 'package:btih_andriod_app/theme/app_typography.dart';
 import 'package:btih_andriod_app/utils/billing_departments.dart';
@@ -107,11 +103,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   final _medicationService = MedicationService();
 
   late AnimationController _entranceController;
+  late AnimationController _bookCtaPulseController;
   late Animation<double> _greetingAnim;
   late Animation<double> _appointmentAnim;
   late Animation<double> _overviewAnim;
   late Animation<double> _activityAnim;
   late Animation<double> _emergencyAnim;
+  late Animation<double> _bookCtaPulse;
 
   final ScrollController _scrollController = ScrollController();
   bool _showScrollHint = false;
@@ -134,6 +132,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     _entranceController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
+    );
+    _bookCtaPulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..repeat(reverse: true);
+    _bookCtaPulse = Tween<double>(begin: 1.0, end: 1.035).animate(
+      CurvedAnimation(
+        parent: _bookCtaPulseController,
+        curve: Curves.easeInOut,
+      ),
     );
     _greetingAnim = CurvedAnimation(
       parent: _entranceController,
@@ -158,10 +166,29 @@ class _DashboardScreenState extends State<DashboardScreen>
     _entranceController.forward();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshScrollHint();
+      _showOfflineToastIfNeeded();
       if (widget.initialTabIndex != PatientBottomNavBar.dashboardIndex) {
         _switchMainTab(widget.initialTabIndex);
       }
     });
+  }
+
+  Future<void> _showOfflineToastIfNeeded() async {
+    final online = await HealthService.instance.check();
+    if (!mounted || online) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'You appear offline. Some features may not be available.',
+          style: AppTypography.roboto(color: AppColors.white, fontSize: 13),
+        ),
+        backgroundColor: AppColors.deepRed,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      ),
+    );
   }
 
   @override
@@ -170,6 +197,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _scrollController.removeListener(_onDashboardScroll);
     _scrollController.dispose();
     _entranceController.dispose();
+    _bookCtaPulseController.dispose();
     super.dispose();
   }
 
@@ -417,17 +445,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (mounted) await _loadRecentActivity();
   }
 
-  Future<bool> _ensureGuestProfileForDoctors() async {
-    if (_isLoggedIn || GuestSession.isComplete) return true;
-    if (!mounted) return false;
-
-    final completed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => const GuestPatientInfoScreen()),
-    );
-    return completed == true && GuestSession.isComplete;
-  }
-
   Future<bool> _checkLoginAndNavigate(String destination) async {
     if (_isLoggedIn) return true;
     if (!mounted) return false;
@@ -451,8 +468,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
           content: const Text(
-            'You need to login first to access this feature.',
-            textAlign: TextAlign.center,
+            'You need to login first to access this feature.'
           ),
           actions: [
             TextButton(
@@ -516,7 +532,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   void _goToDoctorsList() async {
-    if (!_isLoggedIn && !await _ensureGuestProfileForDoctors()) return;
     if (!mounted) return;
     await Navigator.push(
       context,
@@ -591,12 +606,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (mounted) await _loadRecentActivity();
   }
 
-  Future<void> _openBilling() async {
-    if (!await _checkLoginAndNavigate('billing') || !mounted) return;
+  Future<void> _openMore() async {
+    if (!_isLoggedIn) {
+      _showLoginRequiredDialog('more');
+      return;
+    }
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => PatientReportHistoryScreen(
+        builder: (context) => MoreHubScreen(
           patientMrNo: widget.patientMrNo,
           patientName: widget.patientName,
           isLoggedIn: _isLoggedIn,
@@ -667,28 +685,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         builder: (context) => NotificationPreferencesScreen(
           patientMrNo: widget.patientMrNo,
         ),
-      ),
-    );
-  }
-
-  Future<void> _openPrivacyPolicy() async {
-    _closeProfileDrawer();
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const SettingsStaticScreen(
-          page: SettingsStaticPage.privacyPolicy,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openHelpSupport() async {
-    _closeProfileDrawer();
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const HelpSupportScreen(),
       ),
     );
   }
@@ -803,8 +799,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         );
       case 3:
         _openRecords();
-      case 4:
-        _openBilling();
+      case PatientBottomNavBar.moreIndex:
+        _openMore();
     }
   }
 
@@ -830,13 +826,26 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      // Guest root: intercept Android back and offer Exit Guest Mode.
+      // Logged-in users keep default back behavior.
+      canPop: _isLoggedIn,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_scaffoldKey.currentState?.isEndDrawerOpen ?? false) {
+          _closeProfileDrawer();
+          return;
+        }
+        if (!_isLoggedIn) {
+          _logout();
+        }
+      },
+      child: Scaffold(
       key: _scaffoldKey,
       backgroundColor: AppColors.white,
       endDrawer: _buildProfileDrawer(),
       body: Column(
         children: [
-          const OfflineBanner(),
           _fadeSlideIn(
             animation: _greetingAnim,
             offsetY: 0.04,
@@ -891,13 +900,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                           animation: _overviewAnim,
                           child: _buildHealthSnapshot(),
                         ),
-                        if (_isLoggedIn) ...[
-                          const SizedBox(height: _sectionGap),
-                          _fadeSlideIn(
-                            animation: _activityAnim,
-                            child: _buildRecentActivity(),
-                          ),
-                        ],
+                        const SizedBox(height: _sectionGap),
+                        _fadeSlideIn(
+                          animation: _activityAnim,
+                          child: _buildRecentActivity(),
+                        ),
                         const SizedBox(height: _sectionGap),
                         _fadeSlideIn(
                           animation: _emergencyAnim,
@@ -926,6 +933,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         ],
       ),
       bottomNavigationBar: _buildBottomNav(),
+    ),
     );
   }
 
@@ -990,24 +998,27 @@ class _DashboardScreenState extends State<DashboardScreen>
               children: [
                 Row(
                   children: [
-                    // Brand mark only — sized to stay clear of header actions.
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: 188,
-                        maxHeight: 54,
-                      ),
-                      child: Image.asset(
-                        'assets/images/logo.png',
-                        height: 52,
-                        fit: BoxFit.contain,
+                    // Brand mark — Flexible so action buttons never overflow.
+                    Expanded(
+                      child: Align(
                         alignment: Alignment.centerLeft,
+                        child: Image.asset(
+                          'assets/images/logo_splash.png',
+                          height: 40,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.centerLeft,
+                          errorBuilder: (_, __, ___) => const SizedBox(
+                            height: 40,
+                            width: 40,
+                          ),
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 8),
                     _buildNotificationHeaderButton(),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     _buildMessagesHeaderButton(),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     _buildProfileMenuButton(forHero: true),
                   ],
                 ),
@@ -1015,7 +1026,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 Text(
                   DashboardHelpers.timeBasedGreeting(),
                   style: AppTypography.raleway(
-                    fontSize: 22,
+                    fontSize: 18,
                     fontWeight: FontWeight.w600,
                     color: AppColors.white.withValues(alpha: 0.95),
                     height: 1.2,
@@ -1024,7 +1035,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 Text(
                   _displayName, 
                   style: AppTypography.montserrat(
-                    fontSize: 28,
+                    fontSize: 24,
                     fontWeight: FontWeight.w700,
                     color: AppColors.white,
                     height: 1.2,
@@ -1154,7 +1165,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       onTap: _showProfileMenu,
       borderRadius: BorderRadius.circular(24),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(6, 6, 10, 6),
+        padding: forHero
+            ? const EdgeInsets.fromLTRB(5, 5, 4, 5)
+            : const EdgeInsets.fromLTRB(6, 6, 10, 6),
         decoration: BoxDecoration(
           color: forHero
               ? AppColors.white.withValues(alpha: 0.14)
@@ -1170,31 +1183,39 @@ class _DashboardScreenState extends State<DashboardScreen>
             PatientAvatar(
               displayName: _displayName,
               imageUrl: AuthSession.profileImageUrl,
-              size: 30,
+              size: 28,
               backgroundColor:
                   forHero ? AppColors.duskMaroon : AppColors.blush,
               foregroundColor:
                   forHero ? AppColors.white : AppColors.primaryRed,
             ),
-            const SizedBox(width: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 72),
-              child: Text(
-                _displayName.split(' ').first,
-                style: AppTypography.raleway(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: forHero ? AppColors.white : AppColors.darkText,
+            if (!forHero) ...[
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  _displayName.split(' ').first,
+                  style: AppTypography.raleway(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.darkText,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 18,
-              color: forHero ? AppColors.white : AppColors.greyText,
-            ),
+              const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 18,
+                color: AppColors.greyText,
+              ),
+            ] else ...[
+              const SizedBox(width: 4),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 16,
+                color: AppColors.white.withValues(alpha: 0.9),
+              ),
+            ],
           ],
         ),
       ),
@@ -1365,29 +1386,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 8),
                 _profileDrawerTile(
-                  icon: Icons.privacy_tip_outlined,
-                  label: 'Privacy Policy',
-                  onTap: _openPrivacyPolicy,
-                ),
-                const SizedBox(height: 8),
-                _profileDrawerTile(
-                  icon: Icons.help_outline_rounded,
-                  label: 'Help & Support',
-                  onTap: _openHelpSupport,
-                ),
-                if (_isLoggedIn) ...[
-                  const SizedBox(height: 8),
-                  _profileDrawerTile(
-                    icon: Icons.videocam_outlined,
-                    label: 'Telemedicine',
-                    onTap: () {
-                      _closeProfileDrawer();
-                      openTelemedicineScreen(context);
-                    },
-                  ),
-                ],
-                const SizedBox(height: 8),
-                _profileDrawerTile(
                   icon: Icons.logout_rounded,
                   label: _isLoggedIn ? 'Logout' : 'Exit guest mode',
                   isDestructive: true,
@@ -1483,31 +1481,29 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   BoxDecoration _appointmentCardDecoration({bool booked = false}) {
+    if (!booked) {
+      return BoxDecoration(
+        gradient: AppColors.brandGradient,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.deepRed.withValues(alpha: 0.22),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      );
+    }
+
     return BoxDecoration(
-      gradient: LinearGradient(
-        colors: booked
-            ? [
-                AppColors.softRed.withValues(alpha: 0.95),
-                AppColors.lightMaroon.withValues(alpha: 0.72),
-                AppColors.softRed.withValues(alpha: 0.82),
-              ]
-            : [
-                AppColors.white,
-                AppColors.blush,
-                AppColors.softRed.withValues(alpha: 0.48),
-              ],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      borderRadius: BorderRadius.circular(24),
-      border: Border.all(
-        color: AppColors.primaryRed.withValues(alpha: booked ? 0.22 : 0.16),
-      ),
+      color: AppColors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppColors.fieldBorder),
       boxShadow: [
         BoxShadow(
-          color: AppColors.deepRed.withValues(alpha: booked ? 0.11 : 0.08),
-          blurRadius: 14,
-          offset: const Offset(0, 4),
+          color: AppColors.shadow.withValues(alpha: 0.06),
+          blurRadius: 10,
+          offset: const Offset(0, 3),
         ),
       ],
     );
@@ -1516,79 +1512,42 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildBookedAppointmentContent(_UpcomingAppointment appt) {
     final hasSeparateTime =
         appt.scheduleTime.isNotEmpty && appt.scheduleTime != appt.scheduleDay;
+    final whenLine = hasSeparateTime
+        ? '${appt.scheduleDay} · ${appt.scheduleTime}'
+        : appt.scheduleDay;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'UPCOMING APPOINTMENT',
-          style: AppTypography.raleway(
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.9,
+          'Upcoming',
+          style: AppTypography.roboto(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
             color: AppColors.primaryRed,
           ),
         ),
-        const SizedBox(height: 8),
-        if (hasSeparateTime) ...[
-          Text(
-            appt.scheduleTime,
-            style: AppTypography.montserrat(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: AppColors.deepRed,
-              height: 1.1,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 3),
-          Text(
-            appt.scheduleDay,
-            style: AppTypography.raleway(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.primaryRed,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ] else ...[
-          Text(
-            appt.scheduleDay,
-            style: AppTypography.montserrat(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.deepRed,
-              height: 1.15,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-        const SizedBox(height: 6),
+        const SizedBox(height: 2),
         Text(
           appt.doctorName,
           style: AppTypography.raleway(
             fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: AppColors.deepRed,
+            fontWeight: FontWeight.w700,
+            color: AppColors.darkText,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        if (appt.department != null) ...[
-          const SizedBox(height: 2),
-          Text(
-            appt.department!,
-            style: AppTypography.roboto(
-              fontSize: 12,
-              color: AppColors.greyText,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        const SizedBox(height: 2),
+        Text(
+          whenLine,
+          style: AppTypography.roboto(
+            fontSize: 12,
+            color: AppColors.greyText,
           ),
-        ],
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }
@@ -1632,20 +1591,24 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _appointmentIconBadge({double size = 40}) {
+  Widget _appointmentIconBadge({double size = 40, bool onBrand = false}) {
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: AppColors.white.withValues(alpha: 0.88),
+        color: onBrand
+            ? AppColors.white.withValues(alpha: 0.18)
+            : AppColors.white.withValues(alpha: 0.88),
         shape: BoxShape.circle,
         border: Border.all(
-          color: AppColors.primaryRed.withValues(alpha: 0.18),
+          color: onBrand
+              ? AppColors.white.withValues(alpha: 0.35)
+              : AppColors.primaryRed.withValues(alpha: 0.18),
         ),
       ),
       child: Icon(
-        Icons.event_available_outlined,
-        color: AppColors.deepRed,
+        Icons.event_available_rounded,
+        color: onBrand ? AppColors.white : AppColors.deepRed,
         size: size * 0.5,
       ),
     );
@@ -1684,18 +1647,88 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildBookAppointmentCta() {
+    return ScaleTransition(
+      scale: _bookCtaPulse,
+      child: TapFeedback(
+        onTap: _goToDoctorsList,
+        borderRadius: BorderRadius.circular(16),
+        splashColor: AppColors.white.withValues(alpha: 0.22),
+        highlightColor: AppColors.white.withValues(alpha: 0.12),
+        child: Semantics(
+          button: true,
+          label: 'Book an appointment',
+          hint: 'Opens the doctors list to schedule a visit',
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+            decoration: _appointmentCardDecoration(),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: AppColors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.calendar_month_rounded,
+                    color: AppColors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Book an Appointment',
+                        style: AppTypography.raleway(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _isLoggedIn
+                            ? 'Find a doctor and reserve a slot'
+                            : 'Browse doctors and book a slot',
+                        style: AppTypography.roboto(
+                          fontSize: 12,
+                          color: AppColors.white.withValues(alpha: 0.88),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: AppColors.white,
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildAppointmentSection() {
     if (_loadingAppointment && _isLoggedIn) {
       return Container(
-        height: 92,
+        height: 72,
         decoration: _appointmentCardDecoration(),
         alignment: Alignment.center,
         child: const SizedBox(
           width: 22,
           height: 22,
           child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: AppColors.primaryRed,
+            strokeWidth: 2.5,
+            color: AppColors.white,
           ),
         ),
       );
@@ -1706,87 +1739,80 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     if (hasAppointment) {
       final appt = appointment;
-      return TapFeedback(
-        onTap: _openUpcomingAppointmentDetails,
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: _appointmentCardDecoration(booked: true),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _appointmentIconBadge(),
-              const SizedBox(width: 12),
-              Expanded(child: _buildBookedAppointmentContent(appt)),
-              const SizedBox(width: 8),
-              _appointmentCompactAction(
-                onTap: _openUpcomingAppointmentDetails,
-                tooltip: 'View appointment details',
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return TapFeedback(
-      onTap: () => _switchMainTab(0),
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: _appointmentCardDecoration(),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            _appointmentIconBadge(),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TapFeedback(
+            onTap: _openUpcomingAppointmentDetails,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+              decoration: _appointmentCardDecoration(booked: true),
+              child: Row(
                 children: [
-                  Text(
-                    'UPCOMING APPOINTMENT',
-                    style: AppTypography.raleway(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.9,
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.softRed,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.event_available_rounded,
                       color: AppColors.primaryRed,
+                      size: 20,
                     ),
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(width: 12),
+                  Expanded(child: _buildBookedAppointmentContent(appt)),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.primaryRed.withValues(alpha: 0.8),
+                    size: 22,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TapFeedback(
+            onTap: _goToDoctorsList,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              decoration: BoxDecoration(
+                color: AppColors.blush,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.softRed),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.add_rounded,
+                    size: 18,
+                    color: AppColors.deepRed,
+                  ),
+                  const SizedBox(width: 6),
                   Text(
-                    'Book an appointment',
-                    style: AppTypography.montserrat(
-                      fontSize: 16,
+                    'Book another',
+                    style: AppTypography.raleway(
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: AppColors.deepRed,
-                      height: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _isLoggedIn
-                        ? 'Schedule your visit with a specialist'
-                        : 'Book as guest or login to sync',
-                    style: AppTypography.roboto(
-                      fontSize: 12,
-                      color: AppColors.greyText,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            _appointmentCompactAction(
-              onTap: () => _switchMainTab(0),
-              tooltip: 'Book appointment',
-            ),
-          ],
-        ),
-      ),
-    );
+          ),
+        ],
+      );
+    }
+
+    return _buildBookAppointmentCta();
   }
 
   Widget _buildHealthSnapshot() {
@@ -1999,11 +2025,57 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
         const SizedBox(height: 12),
         if (_recentActivity.isEmpty)
-          Text(
-            'No recent activity yet.',
-            style: AppTypography.roboto(
-              fontSize: 14,
-              color: AppColors.greyText,
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.fieldBorder),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.softRed,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.history_rounded,
+                    color: AppColors.deepRed,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'No recent activity yet',
+                        style: AppTypography.raleway(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.darkText,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _isLoggedIn
+                            ? 'Your recent visits, reports, and bookings will show here.'
+                            : 'Browse doctors and book an appointment to get started.',
+                        style: AppTypography.roboto(
+                          fontSize: 12.5,
+                          color: AppColors.greyText,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           )
         else

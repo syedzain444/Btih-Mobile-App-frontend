@@ -20,6 +20,7 @@ class PatientRecordsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Reports tabs in reports_screen: 0 Lab, 1 Gastro, 2 Radiology, 3 Prescription
     final reportModules = [
       _RecordModule(
         title: 'Laboratory',
@@ -29,19 +30,22 @@ class PatientRecordsScreen extends StatelessWidget {
         onTap: () => _openReports(context, categoryIndex: 0),
       ),
       _RecordModule(
-        title: 'Gastro',
-        subtitle: 'Endoscopy & gastro reports',
-        icon: Icons.medical_services_outlined,
-        gradient: [AppColors.deepRed, AppColors.rustRed],
-        onTap: () => _openReports(context, categoryIndex: 1),
-      ),
-      _RecordModule(
         title: 'Radiology',
         subtitle: 'X-ray, MRI, CT & imaging',
         icon: Icons.radio_rounded,
         gradient: [AppColors.primaryRed, AppColors.rustRed],
         onTap: () => _openReports(context, categoryIndex: 2),
       ),
+      _RecordModule(
+        title: 'Gastro',
+        subtitle: 'Endoscopy & gastro reports',
+        icon: Icons.medical_services_outlined,
+        gradient: [AppColors.deepRed, AppColors.rustRed],
+        onTap: () => _openReports(context, categoryIndex: 1),
+      ),
+    ];
+
+    final prescriptionModules = [
       _RecordModule(
         title: 'Prescription',
         subtitle: 'Doctor prescriptions & medications',
@@ -85,7 +89,7 @@ class PatientRecordsScreen extends StatelessWidget {
       backgroundColor: AppColors.white,
       appBar: AppAppBar(
         title: Text(
-          'Records',
+          'Patient Records',
           style: AppTypography.raleway(
             fontSize: 20,
             fontWeight: FontWeight.w600,
@@ -99,7 +103,7 @@ class PatientRecordsScreen extends StatelessWidget {
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 48),
         children: [
           _buildSection(
             title: 'Reports & Results',
@@ -111,6 +115,12 @@ class PatientRecordsScreen extends StatelessWidget {
             title: 'Medical History',
             icon: Icons.timeline_outlined,
             modules: historyModules,
+          ),
+          const SizedBox(height: 28),
+          _buildSection(
+            title: 'Doctor Prescriptions',
+            icon: Icons.medication_outlined,
+            modules: prescriptionModules,
           ),
         ],
       ),
